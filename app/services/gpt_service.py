@@ -1,27 +1,26 @@
 import json
 import logging
-from typing import Dict, List, Optional, Tuple, Any, cast
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from uuid import UUID
 
-import asyncio
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 from app.config import settings
-from app.models.booking import BookingFunctionArgs, TimeOfDay, ContactMethod
+from app.models.booking import BookingFunctionArgs
+from app.models.message import Message, MessageType
+from app.db.repositories.message import MessageRepository
 from app.utils import format_phone_for_display
 
 logger = logging.getLogger(__name__)
 
 class GPTService:
-    """Service for interacting with the OpenAI GPT API."""
+    """Stateless service for interacting with the OpenAI GPT API."""
     
     def __init__(self, api_key: str = settings.openai_api_key, model: str = settings.openai_model):
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
-        self.conversation_histories: Dict[str, List[ChatCompletionMessageParam]] = {}
     
     def _create_system_prompt(self, phone_number: Optional[str] = None) -> str:
         """
@@ -172,20 +171,59 @@ When all information is collected, use the collect_booking_info function to subm
             }
         ]
     
-    def _initialize_conversation(self, conversation_id: str, phone_number: Optional[str] = None) -> None:
+    async def get_conversation_history(self, conversation_id: UUID) -> List[Dict[str, Any]]:
         """
-        Initialize a conversation history or reset it with a new system prompt.
+        Retrieve conversation history from the database and format it for GPT.
         
         Args:
             conversation_id: The conversation ID
-            phone_number: The user's phone number, if known
+            
+        Returns:
+            List of message objects for the GPT API
         """
-        if conversation_id not in self.conversation_histories:
-            self.conversation_histories[conversation_id] = [
-                {"role": "system", "content": self._create_system_prompt(phone_number)}
-            ]
+        # Get messages from the database
+        messages = await MessageRepository.get_conversation_history(conversation_id)
+        
+        # Start with system message
+        history = [
+            {"role": "system", "content": self._create_system_prompt(None)}
+        ]
+        
+        # Add each message to the history
+        for msg in messages:
+            if msg.is_from_bot:
+                # Check if there's function call information
+                if msg.content.startswith('{"name":"collect_booking_info"'):
+                    try:
+                        # This is a function result message
+                        content = json.loads(msg.content)
+                        history.append({
+                            "role": "function",
+                            "name": content.get("name"),
+                            "content": msg.content
+                        })
+                    except:
+                        # Regular bot message
+                        history.append({
+                            "role": "assistant",
+                            "content": msg.content
+                        })
+                else:
+                    # Regular bot message
+                    history.append({
+                        "role": "assistant",
+                        "content": msg.content
+                    })
+            else:
+                # User message
+                history.append({
+                    "role": "user",
+                    "content": msg.content
+                })
+                
+        return history
     
-    async def process_message(self, conversation_id: str, message: str, phone_number: Optional[str] = None) -> Tuple[str, Optional[BookingFunctionArgs]]:
+    async def process_message(self, conversation_id: UUID, message: str, phone_number: Optional[str] = None) -> Tuple[str, Optional[BookingFunctionArgs]]:
         """
         Process a user message through the GPT service.
         
@@ -197,56 +235,62 @@ When all information is collected, use the collect_booking_info function to subm
         Returns:
             A tuple of (response_text, booking_data)
         """
-        self._initialize_conversation(conversation_id, phone_number)
-        self.conversation_histories[conversation_id].append({"role": "user", "content": message})
+        # Get conversation history from the database
+        history = await self.get_conversation_history(conversation_id)
+        
+        # Update system message with phone number if provided
+        if phone_number and history[0]["role"] == "system":
+            history[0]["content"] = self._create_system_prompt(phone_number)
+            
+        # Add the current message to history
+        history.append({"role": "user", "content": message})
         
         try:
-            response = await self._call_openai_api(self.conversation_histories[conversation_id])
+            # Call OpenAI API
+            response = await self._call_openai_api(history)
             booking_data = None
             message_object = response.choices[0].message
             response_content = message_object.content or ""
             
+            # If there's a function call, extract booking data
             if message_object.function_call and message_object.function_call.name == "collect_booking_info":
                 try:
                     args = json.loads(message_object.function_call.arguments)
                     booking_data = BookingFunctionArgs(**args)
                     logger.info(f"Extracted booking data: {booking_data}")
+                    
+                    # Store function call in the database
+                    await MessageRepository.create(
+                        conversation_id,
+                        {
+                            "content": json.dumps({
+                                "name": "collect_booking_info",
+                                "arguments": args
+                            }),
+                            "sender_id": "bot",
+                            "is_from_bot": True,
+                            "message_type": MessageType.TEXT
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"Error parsing function arguments: {e}")
             
-            if message_object.function_call:
-                self.conversation_histories[conversation_id].append({
-                    "role": "assistant",
+            # Store the assistant's response in the database
+            await MessageRepository.create(
+                conversation_id,
+                {
                     "content": response_content,
-                    "function_call": {
-                        "name": message_object.function_call.name,
-                        "arguments": message_object.function_call.arguments
-                    }
-                })
-            else:
-                self.conversation_histories[conversation_id].append({
-                    "role": "assistant",
-                    "content": response_content
-                })
+                    "sender_id": "bot",
+                    "is_from_bot": True,
+                    "message_type": MessageType.TEXT
+                }
+            )
             
             return response_content, booking_data
             
         except Exception as e:
             logger.error(f"Error processing message with GPT: {e}")
             return "Извините, произошла ошибка при обработке вашего сообщения. Пожалуйста, попробуйте еще раз.", None
-    
-    def reset_conversation_for_new_booking(self, conversation_id: str, phone_number: Optional[str] = None) -> None:
-        """
-        Reset conversation history for a new booking while keeping system prompt.
-        
-        Args:
-            conversation_id: The conversation ID
-            phone_number: The user's phone number, if known
-        """
-        if conversation_id in self.conversation_histories:
-            updated_system_prompt = self._create_system_prompt(phone_number)
-            updated_system_message = {"role": "system", "content": updated_system_prompt}
-            self.conversation_histories[conversation_id] = [updated_system_message]
     
     async def _call_openai_api(self, messages: List[Dict[str, Any]]) -> Any:
         """
@@ -265,30 +309,3 @@ When all information is collected, use the collect_booking_info function to subm
             temperature=0.7,
             max_tokens=1000
         )
-    
-    def get_conversation_history(self, conversation_id: str) -> List[Dict[str, Any]]:
-        """
-        Get the conversation history for a given conversation ID.
-        
-        Args:
-            conversation_id: The conversation ID
-            
-        Returns:
-            The conversation history
-        """
-        return self.conversation_histories.get(conversation_id, [])
-    
-    def add_message_to_history(self, conversation_id: str, role: str, content: str) -> None:
-        """
-        Add a message to the conversation history.
-        
-        Args:
-            conversation_id: The conversation ID
-            role: The message role (user or assistant)
-            content: The message content
-        """
-        self._initialize_conversation(conversation_id)
-        self.conversation_histories[conversation_id].append({
-            "role": role,
-            "content": content
-        })

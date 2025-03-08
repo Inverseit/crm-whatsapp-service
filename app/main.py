@@ -51,10 +51,16 @@ async def startup_event():
     logger.info("Starting up the application")
     await db.connect()
     
-    # Initialize database schema in debug mode
-    if settings.debug:
-        logger.info("Initializing database schema (debug mode)")
-        await db.init_db()
+    # Check if tables exist
+    tables_exist = await db.check_tables_exist()
+    
+    if not tables_exist:
+        logger.warning("Database tables don't exist. Use INITIALIZE_DB=true to create them.")
+        if settings.initialize_db:
+            logger.info("Initializing database schema as tables don't exist")
+            await db.init_db()
+        else:
+            logger.warning("Skipping database initialization. Set INITIALIZE_DB=true if you want to initialize the database.")
 
 @app.on_event("shutdown")
 async def shutdown_event():

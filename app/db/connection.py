@@ -28,10 +28,11 @@ class Database:
                 )
                 logger.info("Connected to PostgreSQL database")
                 
-                # Initialize database schema
-                if settings.debug:
+                # Initialize database schema if requested
+                if settings.initialize_db:
+                    logger.info("Initializing database schema (as requested)")
                     await self.init_db()
-                    
+                
             except Exception as e:
                 logger.error(f"Failed to connect to database: {e}")
                 raise
@@ -65,6 +66,27 @@ class Database:
         except Exception as e:
             logger.error(f"Error initializing database schema: {e}")
             raise
+    
+    async def check_tables_exist(self) -> bool:
+        """
+        Check if the essential tables exist in the database.
+        
+        Returns:
+            True if tables exist, False otherwise
+        """
+        if not self.pool:
+            await self.connect()
+            
+        query = """
+        SELECT EXISTS (
+            SELECT FROM pg_tables 
+            WHERE schemaname = 'public' AND tablename = 'conversation'
+        );
+        """
+        
+        async with self.pool.acquire() as conn:
+            exists = await conn.fetchval(query)
+            return exists
             
     async def execute(self, query: str, *args, **kwargs) -> str:
         """

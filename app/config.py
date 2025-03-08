@@ -12,10 +12,17 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="salon_booking")
     postgres_host: str = Field(default="localhost")
     postgres_port: int = Field(default=5432)
+    initialize_db: bool = Field(default=False, description="Whether to initialize the database schema on startup")
     
     # OpenAI API settings
     openai_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o")
+    
+    # WhatsApp API settings
+    whatsapp_api_url: str = Field(default="https://graph.facebook.com/v17.0")
+    whatsapp_api_key: str = Field(default="")
+    whatsapp_phone_number_id: str = Field(default="")
+    whatsapp_verify_token: str = Field(default="your_verification_token")
     
     # App settings
     debug: bool = Field(default=False)
