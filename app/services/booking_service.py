@@ -57,22 +57,14 @@ class BookingManager:
             logger.debug("Handling greeting state")
             response = await self._handle_greeting(conversation)
             return response, True
-        elif conversation.state == ConversationState.COLLECTING_INFO:
-            logger.debug("Handling collecting info state")
-            response = await self._handle_collecting_info(conversation, message_text)
-            return response, True
-        elif conversation.state == ConversationState.CONFIRMING:
-            logger.debug("Handling confirming state")
-            response = await self._handle_confirming(conversation, message_text)
-            return response, True
         elif conversation.state == ConversationState.COMPLETED:
             logger.debug("Handling completed state")
             response = await self._handle_completed(conversation, message_text)
             return response, True
         else:
-            logger.error(f"Unknown conversation state: {conversation.state}")
-            response = await self._handle_collecting_info(conversation, message_text)
-            return response, True
+            # For all other states, just process with GPT and check for booking data
+            logger.debug("Handling conversation with GPT")
+            return await self._handle_conversation_with_gpt(conversation, message_text)
     
     async def _handle_greeting(self, conversation: Conversation) -> str:
         """
@@ -84,7 +76,7 @@ class BookingManager:
         Returns:
             The response message
         """
-        # Update conversation state
+        # Update conversation state to in progress
         await ConversationRepository.update(
             conversation.id, 
             {"state": ConversationState.COLLECTING_INFO}
@@ -103,16 +95,16 @@ class BookingManager:
         
         return greeting
     
-    async def _handle_collecting_info(self, conversation: Conversation, message_text: str) -> str:
+    async def _handle_conversation_with_gpt(self, conversation: Conversation, message_text: str) -> Tuple[str, bool]:
         """
-        Handle the collecting info state of a conversation.
+        Process the conversation with GPT and check for booking data.
         
         Args:
             conversation: The conversation
             message_text: The user's message
             
         Returns:
-            The response message
+            Tuple of (response_text, should_send)
         """
         # Process message with GPT
         response, booking_data = await self.gpt_service.process_message(
@@ -121,171 +113,55 @@ class BookingManager:
             conversation.phone_number
         )
         
-        # If booking data was collected, move to confirming state
+        # If booking data was provided by GPT, create a booking
         if booking_data:
             try:
-                # Create confirmation message
-                logger.debug(f"Creating confirmation message for booking: {booking_data}")
-                confirmation_message = await self._create_confirmation_message(conversation.id, booking_data)
+                logger.info(f"Received booking data for {booking_data.client_name}, creating booking")
                 
-                # Update conversation state
+                # Convert BookingFunctionArgs to BookingCreate
+                booking_create = self._convert_to_booking_create(booking_data, conversation.id)
+                
+                # Save the booking
+                booking = await BookingRepository.create(booking_create)
+                
+                # Update conversation state to completed
                 await ConversationRepository.update(
                     conversation.id, 
-                    {"state": ConversationState.CONFIRMING}
+                    {"state": ConversationState.COMPLETED, "is_complete": True}
                 )
                 
-                # Save the confirmation message
+                # Append a confirmation message to the GPT response
+                confirmation = "\n\nВаша запись успешно создана. Администратор салона свяжется с вами в ближайшее время для подтверждения. Спасибо за ваше обращение!"
+                full_response = response + confirmation
+                
+                # Create a bot message for the confirmation
                 bot_message = MessageCreate(
-                    content=confirmation_message,
+                    content=confirmation,
                     sender_id="bot",
                     is_from_bot=True
                 )
                 await MessageRepository.create(conversation.id, bot_message)
                 
-                return confirmation_message
+                logger.info(f"Booking created: {booking.id}")
+                
+                return full_response, True
                 
             except Exception as e:
-                logger.error(f"Error creating booking confirmation: {e}")
-                error_message = "Извините, произошла ошибка при обработке данных бронирования. Пожалуйста, попробуйте еще раз."
+                logger.error(f"Error creating booking: {e}", exc_info=True)
+                error_message = f"{response}\n\nИзвините, произошла ошибка при сохранении вашей записи. Пожалуйста, попробуйте еще раз позже."
                 
-                # Save error message
-                bot_message = MessageCreate(
+                # Add error message to conversation
+                error_bot_message = MessageCreate(
                     content=error_message,
                     sender_id="bot",
                     is_from_bot=True
                 )
-                await MessageRepository.create(conversation.id, bot_message)
+                await MessageRepository.create(conversation.id, error_bot_message)
                 
-                return error_message
+                return error_message, True
         
-        # Return the GPT response (already saved to DB by the GPT service)
-        return response
-    
-    async def _handle_confirming(self, conversation: Conversation, message_text: str) -> str:
-        """
-        Handle the confirming state of a conversation.
-        
-        Args:
-            conversation: The conversation
-            message_text: The user's message
-            
-        Returns:
-            The response message
-        """
-        # Simple confirmation logic - look for confirmation words in Russian
-        logger.debug(f"Handling confirmation message: {message_text}")
-        message_lower = message_text.lower()
-        confirmation_words = ["да", "конечно", "верно", "правильно", "согласен", "подтверждаю", "ок", "хорошо"]
-        rejection_words = ["нет", "неверно", "неправильно", "не так", "ошибка", "изменить", "нужно исправить"]
-        
-        is_confirmed = any(word in message_lower for word in confirmation_words)
-        is_rejected = any(word in message_lower for word in rejection_words)
-        logger.debug(f"Confirmation status: confirmed={is_confirmed}, rejected={is_rejected}")
-        
-        if is_confirmed and not is_rejected:
-            # Get all messages from the conversation history
-            logger.debug("User confirmed booking, processing...")
-            messages = await MessageRepository.get_conversation_history(conversation.id)
-            
-            # Extract booking data from the conversation
-            booking_data = await self._extract_booking_data_from_conversation(conversation.id, messages)
-            
-            if booking_data:
-                try:
-                    # Convert BookingFunctionArgs to BookingCreate
-                    logger.debug(f"Creating booking from data: {booking_data}")
-                    booking_create = self._convert_to_booking_create(booking_data, conversation.id)
-                    
-                    # Save the booking
-                    booking = await BookingRepository.create(booking_create)
-                    
-                    # Update conversation state
-                    await ConversationRepository.update(
-                        conversation.id, 
-                        {"state": ConversationState.COMPLETED, "is_complete": True}
-                    )
-                    
-                    # Create completion message
-                    completion_message = "Спасибо за подтверждение! Ваша заявка на запись принята. " \
-                                       "Администратор салона свяжется с вами в ближайшее время для окончательного подтверждения записи. " \
-                                       "Хорошего дня!"
-                    
-                    # Add bot message to conversation
-                    bot_message = MessageCreate(
-                        content=completion_message,
-                        sender_id="bot",
-                        is_from_bot=True
-                    )
-                    await MessageRepository.create(conversation.id, bot_message)
-                    
-                    logger.info(f"Booking confirmed: {booking.id}")
-                    
-                    return completion_message
-                except Exception as e:
-                    logger.error(f"Error creating booking: {e}")
-                    error_message = "Извините, произошла ошибка при сохранении вашей записи. Пожалуйста, попробуйте еще раз."
-                    
-                    # Add bot message to conversation
-                    bot_message = MessageCreate(
-                        content=error_message,
-                        sender_id="bot",
-                        is_from_bot=True
-                    )
-                    await MessageRepository.create(conversation.id, bot_message)
-                    
-                    return error_message
-            else:
-                # This shouldn't happen, but just in case
-                error_message = "Извините, произошла ошибка с вашей заявкой. Пожалуйста, начните процесс записи заново."
-                
-                # Reset conversation state
-                await ConversationRepository.update(
-                    conversation.id, 
-                    {"state": ConversationState.GREETING}
-                )
-                
-                # Add bot message to conversation
-                bot_message = MessageCreate(
-                    content=error_message,
-                    sender_id="bot",
-                    is_from_bot=True
-                )
-                await MessageRepository.create(conversation.id, bot_message)
-                
-                return error_message
-                
-        elif is_rejected:
-            # User didn't confirm, go back to collecting info
-            await ConversationRepository.update(
-                conversation.id, 
-                {"state": ConversationState.COLLECTING_INFO}
-            )
-            
-            # Create correction response
-            correction_message = "Понял, давайте исправим информацию. Пожалуйста, уточните, что именно нужно изменить?"
-            
-            # Add bot message to conversation
-            bot_message = MessageCreate(
-                content=correction_message,
-                sender_id="bot",
-                is_from_bot=True
-            )
-            await MessageRepository.create(conversation.id, bot_message)
-            
-            return correction_message
-        else:
-            # Unclear response, ask for explicit confirmation
-            clarification_message = "Извините, я не совсем понял ваш ответ. Пожалуйста, подтвердите, верна ли информация о записи? Ответьте 'Да' или 'Нет'."
-            
-            # Add bot message to conversation
-            bot_message = MessageCreate(
-                content=clarification_message,
-                sender_id="bot",
-                is_from_bot=True
-            )
-            await MessageRepository.create(conversation.id, bot_message)
-            
-            return clarification_message
+        # If no booking data yet, just return the GPT response
+        return response, True
     
     async def _handle_completed(self, conversation: Conversation, message_text: str) -> str:
         """
@@ -322,140 +198,9 @@ class BookingManager:
             
             return new_booking_message
         else:
-            thank_you_message = "Спасибо за ваше сообщение! Ваша запись уже подтверждена. Если у вас есть дополнительные вопросы или вы хотите сделать новую запись, просто напишите об этом."
-            
-            # Add bot message to conversation
-            bot_message = MessageCreate(
-                content=thank_you_message,
-                sender_id="bot",
-                is_from_bot=True
-            )
-            await MessageRepository.create(conversation.id, bot_message)
-            
-            return thank_you_message
-    
-    async def _create_confirmation_message(self, conversation_id: UUID, booking: BookingFunctionArgs) -> str:
-        """
-        Create a formatted confirmation message with booking details.
-        
-        Args:
-            conversation_id: The conversation ID
-            booking: The booking data
-            
-        Returns:
-            A formatted confirmation message
-        """
-        # Format date
-        date_str = booking.booking_date or "Не указана"
-        
-        # Format time
-        if booking.booking_time:
-            time_str = booking.booking_time
-        elif booking.time_of_day:
-            time_map = {
-                "morning": "Утро (9:00-12:00)",
-                "afternoon": "День (12:00-17:00)",
-                "evening": "Вечер (17:00-21:00)"
-            }
-            time_str = time_map.get(booking.time_of_day, "Не указано")
-        else:
-            time_str = "Не указано"
-        
-        # Format contact method
-        contact_method_str = "Не указан"
-        if booking.preferred_contact_method:
-            if booking.preferred_contact_method == "phone_call":
-                contact_method_str = "Звонок по телефону"
-            elif booking.preferred_contact_method == "whatsapp_message":
-                contact_method_str = "Сообщение в WhatsApp"
-        
-        # Format contact time
-        contact_time_str = "Не указано"
-        if booking.preferred_contact_time:
-            time_map = {
-                "morning": "Утро (9:00-12:00)",
-                "afternoon": "День (12:00-17:00)",
-                "evening": "Вечер (17:00-21:00)"
-            }
-            contact_time_str = time_map.get(booking.preferred_contact_time, "Не указано")
-        
-        # Format phone numbers for display
-        phone_display = booking.phone
-        
-        # Format WhatsApp number (if different)
-        whatsapp_display = "Тот же, что и телефон для связи"
-        if not booking.use_phone_for_whatsapp and booking.whatsapp:
-            whatsapp_display = booking.whatsapp
-        
-        # Store booking data in GPT service for later retrieval
-        conversation_id_str = str(conversation_id)
-        
-        # Get booking args as a dict - avoid using model_dump()
-        booking_dict = {
-            "client_name": booking.client_name,
-            "phone": booking.phone,
-            "use_phone_for_whatsapp": booking.use_phone_for_whatsapp,
-            "whatsapp": booking.whatsapp,
-            "preferred_contact_method": booking.preferred_contact_method,
-            "preferred_contact_time": booking.preferred_contact_time,
-            "service_description": booking.service_description,
-            "booking_date": booking.booking_date,
-            "booking_time": booking.booking_time,
-            "time_of_day": booking.time_of_day,
-            "additional_notes": booking.additional_notes
-        }
-        
-        # Store function call as a JSON string
-        await MessageRepository.create(
-            conversation_id,
-            MessageCreate(
-                content=json.dumps({
-                    "name": "collect_booking_info",
-                    "arguments": booking_dict
-                }),
-                sender_id="bot",
-                is_from_bot=True,
-                message_type=MessageType.TEXT
-            )
-        )
-        
-        # Build the confirmation message
-        return f"Спасибо за предоставленную информацию! Пожалуйста, проверьте детали вашей записи:\n\n" \
-               f"Имя: {booking.client_name}\n" \
-               f"Телефон: {phone_display}\n" \
-               f"WhatsApp: {whatsapp_display}\n" \
-               f"Предпочтительный способ связи: {contact_method_str}\n" \
-               f"Предпочтительное время для связи: {contact_time_str}\n" \
-               f"Услуга: {booking.service_description}\n" \
-               f"Дата: {date_str}\n" \
-               f"Время: {time_str}\n" \
-               f"Дополнительная информация: {booking.additional_notes or 'Не указана'}\n\n" \
-               f"Всё верно? Ответьте 'Да' для подтверждения или 'Нет' для внесения изменений."
-               
-    async def _extract_booking_data_from_conversation(self, conversation_id: UUID, messages: List[Message]) -> Optional[BookingFunctionArgs]:
-        """
-        Extract booking data from the conversation messages.
-        
-        Args:
-            conversation_id: The conversation ID
-            messages: The messages in the conversation
-            
-        Returns:
-            The booking data, if found
-        """
-        logger.debug(f"Extracting booking data from conversation: {conversation_id}")
-        # Look for function messages in reverse chronological order (most recent first)
-        for msg in reversed(messages):
-            if msg.is_from_bot and msg.content.startswith('{"name":"collect_booking_info"'):
-                try:
-                    # Parse the function call
-                    content = json.loads(msg.content)
-                    if "arguments" in content:
-                        return BookingFunctionArgs(**content["arguments"])
-                except Exception as e:
-                    logger.error(f"Error parsing booking data from conversation: {e}")
-        
-        return None
+            # For any other message, proceed with GPT conversation
+            response, _ = await self._handle_conversation_with_gpt(conversation, message_text)
+            return response
     
     def _convert_to_booking_create(self, booking_args: BookingFunctionArgs, conversation_id: UUID) -> BookingCreate:
         """

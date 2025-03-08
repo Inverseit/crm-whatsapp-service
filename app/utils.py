@@ -18,15 +18,8 @@ def normalize_phone_number(phone: str) -> str:
         # Clean up the phone number
         phone = phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         
-        # If no country code is provided, assume Kazakhstan (+7)
-        if not phone.startswith('+'):
-            if phone.startswith('8'):
-                phone = '+7' + phone[1:]
-            else:
-                phone = '+7' + phone
-        
         # Parse and validate the phone number
-        parsed_number = phonenumbers.parse(phone)
+        parsed_number = phonenumbers.parse(phone, "KZ")
         if not phonenumbers.is_valid_number(parsed_number):
             raise ValueError('Invalid phone number format')
         
@@ -64,15 +57,6 @@ def is_valid_phone_number(phone: str) -> bool:
     try:
         # Clean up the phone number
         phone = phone.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-        
-        # If no country code is provided, assume Kazakhstan (+7)
-        if not phone.startswith('+'):
-            if phone.startswith('8'):
-                phone = '+7' + phone[1:]
-            else:
-                phone = '+7' + phone
-        
-        # Parse and validate the phone number
         parsed_number = phonenumbers.parse(phone)
         return phonenumbers.is_valid_number(parsed_number)
     except Exception:

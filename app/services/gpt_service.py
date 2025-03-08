@@ -1,13 +1,13 @@
 import json
 import logging
-from typing import Dict, List, Optional, Tuple, Any, cast
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from uuid import UUID
 
+import asyncio
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.config import settings
 from app.models.booking import BookingFunctionArgs
 from app.models.message import Message, MessageType, MessageCreate
 from app.db.repositories.message import MessageRepository
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class GPTService:
     """Stateless service for interacting with the OpenAI GPT API."""
     
-    def __init__(self, api_key: str = settings.openai_api_key, model: str = settings.openai_model):
+    def __init__(self, api_key: str, model: str = "gpt-4o"):
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
     
@@ -78,10 +78,13 @@ INFORMATION TO COLLECT:
 
 PHONE NUMBER HANDLING:
 - All clients are from Kazakhstan
-- Kazakhstan phone numbers typically start with +7
-- If the user provides a number starting with 8, replace it with +7
-- If they don't include a country code, assume +7 (Kazakhstan)
 - Format all phone numbers to international format
+
+CONFIRMATION PROCESS:
+- After collecting all required information, summarize it for the client and ask for explicit confirmation
+- Only call the collect_booking_info function AFTER the client has confirmed the information is correct
+- If the client asks to make changes, update the information accordingly and ask for confirmation again
+- Use phrases like "Всё верно?" or "Подтверждаете запись?" to get explicit confirmation
 
 COMMUNICATION STYLE:
 - Always respond in Russian
@@ -97,9 +100,10 @@ PROCESS:
 3. Determine preferred contact method (calls vs. WhatsApp) and ensure correct phone numbers
 4. Collect appointment details (date/time)
 5. Ask for any additional notes or special requests
-6. Double-check all information and use the function to collect the booking data
+6. Summarize all information and ask for confirmation
+7. Once the client confirms, use the collect_booking_info function to submit the data
 
-When all information is collected, use the collect_booking_info function to submit the data.
+When all information is collected AND confirmed, use the collect_booking_info function to submit the data.
 """
         logger.info(f"System prompt created with phone: {formatted_phone}")
         return prompt
@@ -114,7 +118,7 @@ When all information is collected, use the collect_booking_info function to subm
         return [
             {
                 "name": "collect_booking_info",
-                "description": "Collect booking information for beauty salon appointment",
+                "description": "Collect booking information for beauty salon appointment after client confirmation",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -257,11 +261,20 @@ When all information is collected, use the collect_booking_info function to subm
             booking_data = None
             
             # Extract information from the response
-            message_object = response.choices[0].message
-            response_content = message_object.content or ""
+            response_content = ""
+            function_call = None
             
-            # Check for function calls
-            function_call = getattr(message_object, 'function_call', None)
+            if hasattr(response.choices[0], "message"):
+                message_obj = response.choices[0].message
+                response_content = message_obj.content or ""
+                
+                # Check for function calls
+                if hasattr(message_obj, "function_call") and message_obj.function_call:
+                    function_call = message_obj.function_call
+            else:
+                # Fallback - should not normally happen
+                logger.warning("Unexpected response format from OpenAI")
+                response_content = "Извините, произошла ошибка в обработке сообщения."
             
             # If there's a function call, extract booking data
             if function_call and function_call.name == "collect_booking_info":
@@ -313,10 +326,14 @@ When all information is collected, use the collect_booking_info function to subm
         Returns:
             The API response
         """
-        return await self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            functions=self._get_functions_definition(),
-            temperature=0.7,
-            max_tokens=1000
-        )
+        try:
+            return await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                functions=self._get_functions_definition(),
+                temperature=0.7,
+                max_tokens=1000
+            )
+        except Exception as e:
+            logger.error(f"Error calling OpenAI API: {e}", exc_info=True)
+            raise
