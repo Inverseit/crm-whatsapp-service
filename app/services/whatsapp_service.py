@@ -28,6 +28,7 @@ class WhatsAppService:
         if config:
             self.config = config
         else:
+            # Use default config from settings
             self.config = WhatsAppConfig(
                 api_url=settings.whatsapp_api_url,
                 api_key=settings.whatsapp_api_key,
@@ -64,7 +65,7 @@ class WhatsAppService:
         
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.config.access_token}"
+            "Authorization": f"Bearer {self.config.api_key}"
         }
         
         api_url = f"{self.config.api_url}/{self.config.phone_number_id}/messages"
@@ -99,54 +100,70 @@ class WhatsAppService:
             Parsed message information or None if not a valid message
         """
         try:
+            logger.debug(f"Parsing webhook data: {data}")
+            
             # Extract the message data from the webhook payload
             entry = data.get("entry", [])
-            if not entry:
+            if not entry or not isinstance(entry, list) or len(entry) == 0:
+                logger.debug("No entry field in webhook")
                 return None
                 
             changes = entry[0].get("changes", [])
-            if not changes:
+            if not changes or not isinstance(changes, list) or len(changes) == 0:
+                logger.debug("No changes field in entry")
                 return None
                 
             value = changes[0].get("value", {})
             messages = value.get("messages", [])
-            if not messages:
+            if not messages or not isinstance(messages, list) or len(messages) == 0:
+                logger.debug("No messages field in value")
                 return None
                 
             message = messages[0]
-            message_type = message.get("type")
+            message_type = message.get("type", "")
             
             # Extract sender information
-            from_data = message.get("from")
+            from_data = message.get("from", "")
             if not from_data:
+                logger.debug("No from field in message")
                 return None
                 
             result = {
                 "phone_number": from_data,
                 "timestamp": message.get("timestamp", ""),
                 "message_type": message_type,
+                "message": ""  # Default empty message
             }
             
             # Extract message content based on type
             if message_type == "text":
-                text = message.get("text", {}).get("body", "")
-                result["message"] = text
+                text_obj = message.get("text", {})
+                if isinstance(text_obj, dict):
+                    result["message"] = text_obj.get("body", "")
+                else:
+                    result["message"] = "[Text parsing error]"
             elif message_type == "image":
                 result["message"] = "[Image received]"
-                result["media_id"] = message.get("image", {}).get("id", "")
+                image_obj = message.get("image", {})
+                if isinstance(image_obj, dict):
+                    result["media_id"] = image_obj.get("id", "")
             elif message_type == "document":
                 result["message"] = "[Document received]"
-                result["media_id"] = message.get("document", {}).get("id", "")
+                doc_obj = message.get("document", {})
+                if isinstance(doc_obj, dict):
+                    result["media_id"] = doc_obj.get("id", "")
             elif message_type == "location":
                 result["message"] = "[Location received]"
-                location = message.get("location", {})
-                result["latitude"] = location.get("latitude")
-                result["longitude"] = location.get("longitude")
+                location_obj = message.get("location", {})
+                if isinstance(location_obj, dict):
+                    result["latitude"] = location_obj.get("latitude")
+                    result["longitude"] = location_obj.get("longitude")
             else:
                 result["message"] = f"[{message_type} received]"
             
+            logger.info(f"Successfully parsed message from {result['phone_number']}: {result['message'][:50]}...")
             return result
             
         except Exception as e:
-            logger.error(f"Error parsing WhatsApp webhook: {e}")
+            logger.error(f"Error parsing WhatsApp webhook: {e}", exc_info=True)
             return None

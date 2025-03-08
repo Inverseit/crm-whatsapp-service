@@ -84,7 +84,7 @@ class ConversationRepository:
         return [Conversation.model_validate(row) for row in rows]
     
     @staticmethod
-    async def update(conversation_id: UUID, conversation_update: ConversationUpdate) -> Optional[Conversation]:
+    async def update(conversation_id: UUID, conversation_update: ConversationUpdate | dict) -> Optional[Conversation]:
         """Update a conversation."""
         # First check if conversation exists
         conversation = await ConversationRepository.get_by_id(conversation_id)
@@ -97,6 +97,8 @@ class ConversationRepository:
         param_idx = 2  # Start parameter index at 2
         
         # For each field in the update model, add it to the query if it's not None
+        if isinstance(conversation_update, dict):
+            conversation_update = ConversationUpdate(**conversation_update)
         fields = conversation_update.model_dump(exclude_none=True)
         for field_name, value in fields.items():
             # Handle enum values

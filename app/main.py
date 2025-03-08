@@ -2,6 +2,8 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.utils import get_openapi
 
 from app.config import settings
 from app.db.connection import db
@@ -15,13 +17,34 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# API metadata
+API_TITLE = "Beauty Salon Booking API"
+API_DESCRIPTION = """
+## Beauty Salon Booking API
+
+This API powers a beauty salon booking system with GPT-powered conversations.
+
+### Features
+
+* WhatsApp integration
+* Conversational booking flow
+* Booking management
+* Conversation history
+
+### Authentication
+
+Some endpoints may require authentication. Use the appropriate headers as specified in the endpoint documentation.
+"""
+API_VERSION = "1.0.0"
+
+# Create FastAPI app with docs always enabled
 app = FastAPI(
-    title="Beauty Salon Booking API",
-    description="API for managing beauty salon bookings with GPT-powered chatbot",
-    version="1.0.0",
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
+    title=API_TITLE,
+    description=API_DESCRIPTION,
+    version=API_VERSION,
+    # Always enable docs regardless of debug mode
+    docs_url=None,  # We'll define a custom handler
+    redoc_url=None,  # We'll define a custom handler
 )
 
 # Add CORS middleware
@@ -35,6 +58,52 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router, prefix="/api")
+
+# Custom OpenAPI schema definition
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+        
+    openapi_schema = get_openapi(
+        title=API_TITLE,
+        version=API_VERSION,
+        description=API_DESCRIPTION,
+        routes=app.routes,
+    )
+    
+    # Add security schemes if needed
+    # openapi_schema["components"]["securitySchemes"] = {
+    #     "APIKeyHeader": {
+    #         "type": "apiKey",
+    #         "in": "header",
+    #         "name": "X-API-Key"
+    #     }
+    # }
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+# Set custom OpenAPI function
+app.openapi = custom_openapi
+
+# Custom documentation endpoints
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{API_TITLE} - Swagger UI",
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui.css",
+    )
+
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc_html():
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=f"{API_TITLE} - ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+    )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -80,6 +149,7 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    from fastapi.openapi.utils import get_openapi
     
     uvicorn.run(
         "app.main:app",

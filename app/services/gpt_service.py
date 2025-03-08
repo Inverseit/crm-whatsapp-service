@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, cast
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -9,7 +9,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from app.config import settings
 from app.models.booking import BookingFunctionArgs
-from app.models.message import Message, MessageType
+from app.models.message import Message, MessageType, MessageCreate
 from app.db.repositories.message import MessageRepository
 from app.utils import format_phone_for_display
 
@@ -181,47 +181,52 @@ When all information is collected, use the collect_booking_info function to subm
         Returns:
             List of message objects for the GPT API
         """
-        # Get messages from the database
-        messages = await MessageRepository.get_conversation_history(conversation_id)
-        
-        # Start with system message
-        history = [
-            {"role": "system", "content": self._create_system_prompt(None)}
-        ]
-        
-        # Add each message to the history
-        for msg in messages:
-            if msg.is_from_bot:
-                # Check if there's function call information
-                if msg.content.startswith('{"name":"collect_booking_info"'):
-                    try:
-                        # This is a function result message
-                        content = json.loads(msg.content)
-                        history.append({
-                            "role": "function",
-                            "name": content.get("name"),
-                            "content": msg.content
-                        })
-                    except:
+        try:
+            # Get messages from the database
+            messages = await MessageRepository.get_conversation_history(conversation_id)
+            
+            # Start with system message
+            history = [
+                {"role": "system", "content": self._create_system_prompt(None)}
+            ]
+            
+            # Add each message to the history
+            for msg in messages:
+                if msg.is_from_bot:
+                    # Check if there's function call information
+                    if msg.content.startswith('{"name":"collect_booking_info"'):
+                        try:
+                            # This is a function result message
+                            content = json.loads(msg.content)
+                            history.append({
+                                "role": "function",
+                                "name": content.get("name"),
+                                "content": msg.content
+                            })
+                        except:
+                            # Regular bot message
+                            history.append({
+                                "role": "assistant",
+                                "content": msg.content
+                            })
+                    else:
                         # Regular bot message
                         history.append({
                             "role": "assistant",
                             "content": msg.content
                         })
                 else:
-                    # Regular bot message
+                    # User message
                     history.append({
-                        "role": "assistant",
+                        "role": "user",
                         "content": msg.content
                     })
-            else:
-                # User message
-                history.append({
-                    "role": "user",
-                    "content": msg.content
-                })
-                
-        return history
+                    
+            return history
+        except Exception as e:
+            logger.error(f"Error retrieving conversation history: {e}", exc_info=True)
+            # Return a basic history with just the system message
+            return [{"role": "system", "content": self._create_system_prompt(None)}]
     
     async def process_message(self, conversation_id: UUID, message: str, phone_number: Optional[str] = None) -> Tuple[str, Optional[BookingFunctionArgs]]:
         """
@@ -235,61 +240,67 @@ When all information is collected, use the collect_booking_info function to subm
         Returns:
             A tuple of (response_text, booking_data)
         """
-        # Get conversation history from the database
-        history = await self.get_conversation_history(conversation_id)
-        
-        # Update system message with phone number if provided
-        if phone_number and history[0]["role"] == "system":
-            history[0]["content"] = self._create_system_prompt(phone_number)
-            
-        # Add the current message to history
-        history.append({"role": "user", "content": message})
-        
         try:
+            # Get conversation history from the database
+            history = await self.get_conversation_history(conversation_id)
+            
+            # Update system message with phone number if provided
+            if phone_number and history and len(history) > 0 and history[0].get("role") == "system":
+                history[0]["content"] = self._create_system_prompt(phone_number)
+                
+            # Add the current message to history
+            history.append({"role": "user", "content": message})
+            
             # Call OpenAI API
+            logger.debug(f"Sending {len(history)} messages to OpenAI")
             response = await self._call_openai_api(history)
             booking_data = None
+            
+            # Extract information from the response
             message_object = response.choices[0].message
             response_content = message_object.content or ""
             
+            # Check for function calls
+            function_call = getattr(message_object, 'function_call', None)
+            
             # If there's a function call, extract booking data
-            if message_object.function_call and message_object.function_call.name == "collect_booking_info":
+            if function_call and function_call.name == "collect_booking_info":
                 try:
-                    args = json.loads(message_object.function_call.arguments)
+                    args = json.loads(function_call.arguments)
                     booking_data = BookingFunctionArgs(**args)
-                    logger.info(f"Extracted booking data: {booking_data}")
+                    logger.info(f"Extracted booking data for {booking_data.client_name}")
                     
                     # Store function call in the database
                     await MessageRepository.create(
                         conversation_id,
-                        {
-                            "content": json.dumps({
+                        MessageCreate(
+                            content=json.dumps({
                                 "name": "collect_booking_info",
                                 "arguments": args
                             }),
-                            "sender_id": "bot",
-                            "is_from_bot": True,
-                            "message_type": MessageType.TEXT
-                        }
+                            sender_id="bot",
+                            is_from_bot=True,
+                            message_type=MessageType.TEXT
+                        )
                     )
                 except Exception as e:
-                    logger.error(f"Error parsing function arguments: {e}")
+                    logger.error(f"Error parsing function arguments: {e}", exc_info=True)
             
             # Store the assistant's response in the database
             await MessageRepository.create(
                 conversation_id,
-                {
-                    "content": response_content,
-                    "sender_id": "bot",
-                    "is_from_bot": True,
-                    "message_type": MessageType.TEXT
-                }
+                MessageCreate(
+                    content=response_content,
+                    sender_id="bot",
+                    is_from_bot=True,
+                    message_type=MessageType.TEXT
+                )
             )
             
             return response_content, booking_data
             
         except Exception as e:
-            logger.error(f"Error processing message with GPT: {e}")
+            logger.error(f"Error processing message with GPT: {e}", exc_info=True)
             return "Извините, произошла ошибка при обработке вашего сообщения. Пожалуйста, попробуйте еще раз.", None
     
     async def _call_openai_api(self, messages: List[Dict[str, Any]]) -> Any:

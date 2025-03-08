@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    h1 {
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 10px;
+      margin-bottom: 30px;
+    }
+
+    h2 {
+      margin-top: 40px;
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    h3 {
+      margin-top: 30px;
+      color: #555;
+    }
+
+    pre {
+      background-color: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+
+    code {
+      font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .api-section {
+      margin-bottom: 40px;
+      padding: 20px;
+      border-radius: 5px;
+      background-color: #fafafa;
+    }
+
+    .method {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+
+    .get {
+      background-color: #61affe;
+      color: white;
+    }
+
+    .post {
+      background-color: #49cc90;
+      color: white;
+    }
+
+    .section-divider {
+      height: 1px;
+      background-color: #e0e0e0;
+      margin: 40px 0;
+    }
+
+    .navigation {
+      margin-bottom: 30px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Webhooks Documentation</h1>
+
+    <div class="navigation">
+      <a href="/docs-help" class="btn btn-outline-primary">← Back to Main Documentation</a>
+      <a href="/docs" class="btn btn-primary">Interactive API Docs</a>
+    </div>
+
+    <h2>Introduction to Webhooks</h2>
+    <p>
+      Webhooks are the primary method for receiving messages from clients. The beauty salon booking service
+      provides webhook endpoints that can be integrated with messaging platforms like WhatsApp to enable
+      conversational booking flows.
+    </p>
+
+    <div class="section-divider"></div>
+
+    <h2>WhatsApp Integration</h2>
+
+    <h3>Setting Up WhatsApp Business API</h3>
+    <p>
+      To integrate with WhatsApp Business API, you need to:
+    </p>
+    <ol>
+      <li>Create a Meta Developer account and set up a WhatsApp Business API app</li>
+      <li>Configure webhooks to point to your deployment of this API</li>
+      <li>Set appropriate webhook verification token</li>
+      <li>Obtain access token and phone number ID</li>
+    </ol>
+
+    <h3>Webhook Verification</h3>
+    <div class="api-section">
+      <p><span class="method get">GET</span> <code>/api/webhooks/whatsapp</code></p>
+      <p>
+        When you set up a webhook in the Meta Developer Dashboard, Meta will send a verification request
+        to this endpoint to confirm that your server is listening.
+      </p>
+
+      <h4>Query Parameters</h4>
+      <ul>
+        <li><code>mode</code> - Should be "subscribe"</li>
+        <li><code>token</code> - The verification token you configured</li>
+        <li><code>challenge</code> - A challenge string sent by Meta</li>
+      </ul>
+
+      <h4>Response</h4>
+      <p>
+        If verification is successful, the API will respond with the challenge string.
+        If verification fails, a 403 Forbidden response is returned.
+      </p>
+    </div>
+
+    <h3>Receiving WhatsApp Messages</h3>
+    <div class="api-section">
+      <p><span class="method post">POST</span> <code>/api/webhooks/whatsapp</code></p>
+      <p>
+        Meta sends messages received by your WhatsApp Business number to this endpoint.
+        The API processes these messages and initiates the booking conversation flow.
+      </p>
+
+      <h4>Headers</h4>
+      <ul>
+        <li><code>X-Hub-Signature</code> - Optional SHA1 signature for payload verification</li>
+      </ul>
+
+      <h4>Request Body</h4>
+      <p>Meta sends a complex JSON structure. Here's a simplified example:</p>
+      <pre><code>{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "PHONE_NUMBER",
+              "phone_number_id": "PHONE_NUMBER_ID"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "CLIENT_NAME"
+                },
+                "wa_id": "CLIENT_PHONE_NUMBER"
+              }
+            ],
+            "messages": [
+              {
+                "from": "CLIENT_PHONE_NUMBER",
+                "id": "MESSAGE_ID",
+                "timestamp": "TIMESTAMP",
+                "type": "text",
+                "text": {
+                  "body": "Hello, I'd like to book a haircut"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+      <h4>Processing Flow</h4>
+      <ol>
+        <li>The API parses the webhook payload to extract the message and phone number</li>
+        <li>The message is processed by the booking manager</li>
+        <li>A response is sent back to the user via the WhatsApp API</li>
+      </ol>
+
+      <h4>Response</h4>
+      <p>
+        The API responds immediately with a 200 OK status and continues processing the message
+        in the background to avoid webhook timeouts.
+      </p>
+      <pre><code>{
+  "status": "success",
+  "message": "Message received"
+}</code></pre>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <h2>Generic Message Webhook</h2>
+
+    <div class="api-section">
+      <p><span class="method post">POST</span> <code>/api/webhooks/message</code></p>
+      <p>
+        This endpoint provides a simpler interface for receiving messages from any platform.
+        You can use this for custom integrations or for testing.
+      </p>
+
+      <h4>Request Body</h4>
+      <pre><code>{
+  "phone_number": "+77771234567",
+  "message": "Hello, I'd like to book a haircut",
+  "message_type": "text",
+  "timestamp": "2025-03-08T12:00:00Z"
+}</code></pre>
+
+      <h4>Response</h4>
+      <p>The API responds with a 200 OK status and acknowledgment:</p>
+      <pre><code>{
+  "status": "success",
+  "message": "Message received"
+}</code></pre>
+
+      <p>
+        Note: Unlike the WhatsApp webhook, this endpoint doesn't automatically send responses back
+        to the user. You'll need to implement your own message sending logic.
+      </p>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <h2>Testing Webhooks</h2>
+
+    <h3>Local Testing</h3>
+    <p>
+      For local development, you can use tools like ngrok to expose your local server to the internet
+      and test webhook integration:
+    </p>
+    <pre><code>ngrok http 8000</code></pre>
+    <p>
+      Use the provided ngrok URL as your webhook URL in the Meta Developer Dashboard.
+    </p>
+
+    <h3>Test Endpoint</h3>
+    <p>
+      The API provides a test endpoint to verify that webhook processing is working:
+    </p>
+    <pre><code>GET /api/webhooks/test</code></pre>
+    <p>
+      This returns a simple acknowledgment response without performing any processing.
+    </p>
+
+    <div class="section-divider"></div>
+
+    <h2>Debugging Webhooks</h2>
+
+    <p>
+      To debug webhook processing, you can:
+    </p>
+    <ul>
+      <li>Enable debug mode by setting <code>DEBUG=True</code> in your environment</li>
+      <li>Check the application logs for detailed information about webhook processing</li>
+      <li>Use the conversation history endpoints to inspect message processing</li>
+    </ul>
+
+    <h3>Common Issues</h3>
+    <ul>
+      <li><strong>Webhook verification failing:</strong> Check that your verification token matches</li>
+      <li><strong>Messages not being processed:</strong> Check that your WhatsApp API credentials are correct</li>
+      <li><strong>Responses not being sent:</strong> Check connectivity to the WhatsApp API</li>
+    </ul>
+
+    <div class="section-divider"></div>
+
+    <footer class="mt-5 text-center text-muted">
+      <p>&copy; 2025 Beauty Salon Booking API</p>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>

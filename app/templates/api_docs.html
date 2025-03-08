@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    h1 {
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 10px;
+      margin-bottom: 30px;
+    }
+
+    h2 {
+      margin-top: 40px;
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    h3 {
+      margin-top: 30px;
+      color: #555;
+    }
+
+    pre {
+      background-color: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+
+    code {
+      font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .api-section {
+      margin-bottom: 40px;
+      padding: 20px;
+      border-radius: 5px;
+      background-color: #fafafa;
+    }
+
+    .method {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+
+    .get {
+      background-color: #61affe;
+      color: white;
+    }
+
+    .post {
+      background-color: #49cc90;
+      color: white;
+    }
+
+    .put {
+      background-color: #fca130;
+      color: white;
+    }
+
+    .delete {
+      background-color: #f93e3e;
+      color: white;
+    }
+
+    .endpoint {
+      font-family: monospace;
+      padding: 2px 4px;
+      background-color: #f0f0f0;
+      border-radius: 4px;
+    }
+
+    .navigation {
+      margin-bottom: 30px;
+    }
+
+    .section-divider {
+      height: 1px;
+      background-color: #e0e0e0;
+      margin: 40px 0;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Beauty Salon Booking API Documentation</h1>
+
+    <div class="navigation">
+      <div class="d-flex justify-content-between">
+        <div>
+          <a href="/docs" class="btn btn-primary">Interactive API Docs (Swagger)</a>
+          <a href="/redoc" class="btn btn-secondary">ReDoc</a>
+        </div>
+        <div>
+          <a href="/docs-help/webhooks" class="btn btn-outline-dark">Webhooks Guide</a>
+          <a href="/docs-help/integration" class="btn btn-outline-dark">Integration Guide</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-info">
+      <strong>Note:</strong> This documentation provides an overview of the API. For interactive API documentation with
+      request/response examples, use the Swagger UI or ReDoc links above.
+    </div>
+
+    <h2>Introduction</h2>
+    <p>
+      The Beauty Salon Booking API provides endpoints for managing salon bookings through a conversational interface.
+      It integrates with messaging platforms like WhatsApp to provide a seamless booking experience for clients.
+    </p>
+
+    <div class="section-divider"></div>
+
+    <h2>Authentication</h2>
+    <p>
+      The API uses different authentication methods depending on the endpoint:
+    </p>
+    <ul>
+      <li><strong>Webhooks:</strong> Verified using the webhook verification token</li>
+      <li><strong>Admin APIs:</strong> Protected with API keys (include in the <code>X-API-Key</code> header)</li>
+    </ul>
+
+    <div class="section-divider"></div>
+
+    <h2>API Endpoints</h2>
+
+    <h3>Webhooks</h3>
+    <div class="api-section">
+      <p><span class="method get">GET</span> <span class="endpoint">/api/webhooks/whatsapp</span></p>
+      <p>WhatsApp webhook verification endpoint. Used when setting up the WhatsApp Business API integration.</p>
+
+      <p><span class="method post">POST</span> <span class="endpoint">/api/webhooks/whatsapp</span></p>
+      <p>Endpoint for receiving messages from WhatsApp. Processes messages and triggers the booking flow.</p>
+
+      <p><span class="method post">POST</span> <span class="endpoint">/api/webhooks/message</span></p>
+      <p>Generic webhook for receiving messages from any platform in a standardized format.</p>
+    </div>
+
+    <h3>Bookings</h3>
+    <div class="api-section">
+      <p><span class="method get">GET</span> <span class="endpoint">/api/bookings</span></p>
+      <p>Get all bookings. Can filter by status or phone number.</p>
+
+      <p><span class="method get">GET</span> <span class="endpoint">/api/bookings/{booking_id}</span></p>
+      <p>Get a specific booking by ID.</p>
+
+      <p><span class="method put">PUT</span> <span class="endpoint">/api/bookings/{booking_id}</span></p>
+      <p>Update a booking with new information.</p>
+
+      <p><span class="method put">PUT</span> <span class="endpoint">/api/bookings/{booking_id}/status</span></p>
+      <p>Update a booking's status (pending, confirmed, cancelled).</p>
+
+      <p><span class="method delete">DELETE</span> <span class="endpoint">/api/bookings/{booking_id}</span></p>
+      <p>Delete a booking.</p>
+    </div>
+
+    <h3>Conversations</h3>
+    <div class="api-section">
+      <p><span class="method get">GET</span> <span class="endpoint">/api/conversations</span></p>
+      <p>Get all conversations. Can filter for active conversations only.</p>
+
+      <p><span class="method get">GET</span> <span class="endpoint">/api/conversations/{conversation_id}</span></p>
+      <p>Get a specific conversation by ID.</p>
+
+      <p><span class="method get">GET</span> <span class="endpoint">/api/conversations/phone/{phone_number}</span></p>
+      <p>Find a conversation by phone number.</p>
+
+      <p><span class="method get">GET</span> <span class="endpoint">/api/conversations/{conversation_id}/messages</span>
+      </p>
+      <p>Get all messages in a conversation.</p>
+
+      <p><span class="method get">GET</span> <span class="endpoint">/api/conversations/{conversation_id}/history</span>
+      </p>
+      <p>Get the full conversation history in chronological order.</p>
+
+      <p><span class="method post">POST</span> <span class="endpoint">/api/conversations/{conversation_id}/reset</span>
+      </p>
+      <p>Reset a conversation to its initial state.</p>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <h2>Data Models</h2>
+
+    <h3>Booking</h3>
+    <pre><code>{
+  "id": "uuid",
+  "conversation_id": "uuid",
+  "client_name": "string",
+  "phone": "string",
+  "use_phone_for_whatsapp": true,
+  "whatsapp": "string (optional)",
+  "preferred_contact_method": "phone_call | whatsapp_message",
+  "preferred_contact_time": "morning | afternoon | evening (optional)",
+  "service_description": "string",
+  "booking_date": "YYYY-MM-DD (optional)",
+  "booking_time": "HH:MM:SS (optional)",
+  "time_of_day": "morning | afternoon | evening (optional)",
+  "additional_notes": "string (optional)",
+  "status": "pending | confirmed | cancelled",
+  "created_at": "datetime",
+  "last_updated": "datetime"
+}</code></pre>
+
+    <h3>Conversation</h3>
+    <pre><code>{
+  "id": "uuid",
+  "phone_number": "string",
+  "state": "greeting | collecting_info | confirming | completed",
+  "is_complete": false,
+  "created_at": "datetime",
+  "last_updated": "datetime"
+}</code></pre>
+
+    <h3>Message</h3>
+    <pre><code>{
+  "id": "uuid",
+  "conversation_id": "uuid",
+  "content": "string",
+  "message_type": "text | image | document | location",
+  "timestamp": "datetime",
+  "sender_id": "string",
+  "is_from_bot": false
+}</code></pre>
+
+    <div class="section-divider"></div>
+
+    <h2>Integration Flow</h2>
+    <p>The typical integration flow for the beauty salon booking service includes:</p>
+    <ol>
+      <li>Configure webhooks to receive messages from messaging platforms (WhatsApp, etc.)</li>
+      <li>When a user sends a message, it's received by the webhook</li>
+      <li>The message is processed by the GPT-powered conversation manager</li>
+      <li>The system collects booking information through a natural conversation</li>
+      <li>Once all information is collected, the booking is confirmed and saved</li>
+      <li>The system sends confirmation messages back to the user</li>
+    </ol>
+
+    <h3>Example WhatsApp Webhook Payload</h3>
+    <pre><code>{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "PHONE_NUMBER",
+              "phone_number_id": "PHONE_NUMBER_ID"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "CLIENT_NAME"
+                },
+                "wa_id": "CLIENT_PHONE_NUMBER"
+              }
+            ],
+            "messages": [
+              {
+                "from": "CLIENT_PHONE_NUMBER",
+                "id": "MESSAGE_ID",
+                "timestamp": "TIMESTAMP",
+                "type": "text",
+                "text": {
+                  "body": "Hello, I'd like to book a haircut"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <div class="section-divider"></div>
+
+    <h2>Environment Setup</h2>
+    <p>The API requires several environment variables for proper operation:</p>
+    <ul>
+      <li><code>OPENAI_API_KEY</code>: OpenAI API key for GPT integration</li>
+      <li><code>WHATSAPP_ACCESS_TOKEN</code>: WhatsApp Business API access token</li>
+      <li><code>WHATSAPP_PHONE_NUMBER_ID</code>: WhatsApp Business phone number ID</li>
+      <li><code>WHATSAPP_VERIFY_TOKEN</code>: Token for webhook verification</li>
+      <li><code>INITIALIZE_DB</code>: Whether to initialize the database schema (true/false)</li>
+      <li><code>DEBUG</code>: Enable debug mode (true/false)</li>
+    </ul>
+
+    <div class="section-divider"></div>
+
+    <h2>Database Management</h2>
+    <p>
+      The API uses PostgreSQL for data storage. The database schema can be initialized in one of two ways:
+    </p>
+    <ul>
+      <li><strong>Using the INITIALIZE_DB flag:</strong> Set to <code>true</code> to drop and recreate all tables</li>
+      <li><strong>Using Migrations:</strong> The system automatically applies pending migrations on startup</li>
+    </ul>
+    <p>
+      For production environments, using migrations is recommended to avoid data loss.
+    </p>
+
+    <div class="section-divider"></div>
+
+    <footer class="mt-5 text-center text-muted">
+      <p>&copy; 2025 Beauty Salon Booking API</p>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>

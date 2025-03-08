@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    h1 {
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 10px;
+      margin-bottom: 30px;
+    }
+
+    h2 {
+      margin-top: 40px;
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    h3 {
+      margin-top: 30px;
+      color: #555;
+    }
+
+    pre {
+      background-color: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+
+    code {
+      font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .section-divider {
+      height: 1px;
+      background-color: #e0e0e0;
+      margin: 40px 0;
+    }
+
+    .navigation {
+      margin-bottom: 30px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Integration Guide</h1>
+
+    <div class="navigation">
+      <a href="/docs-help" class="btn btn-outline-primary">← Back to Main Documentation</a>
+      <a href="/docs" class="btn btn-primary">Interactive API Docs</a>
+    </div>
+
+    <div class="alert alert-info">
+      <strong>Note:</strong> This guide covers common integration scenarios for the Beauty Salon Booking API.
+    </div>
+
+    <h2>Overview</h2>
+    <p>
+      Integrating the Beauty Salon Booking API involves several key steps:
+    </p>
+    <ol>
+      <li>Setting up the API server</li>
+      <li>Configuring environment variables</li>
+      <li>Connecting with messaging platforms</li>
+      <li>Managing bookings through the API</li>
+    </ol>
+
+    <div class="section-divider"></div>
+
+    <h2>Deployment Options</h2>
+
+    <h3>Docker Deployment</h3>
+    <p>
+      The recommended way to deploy the API is using Docker Compose:
+    </p>
+    <pre><code># Clone the repository
+git clone https://github.com/yourusername/salon-booking-service.git
+cd salon-booking-service
+
+# Create a .env file with your configuration
+cat > .env << EOF
+OPENAI_API_KEY=your_openai_api_key
+WHATSAPP_API_URL=https://graph.facebook.com
+WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
+WHATSAPP_PHONE_NUMBER_ID=your_whatsapp_phone_number_id
+WHATSAPP_VERIFY_TOKEN=your_verification_token
+INITIALIZE_DB=true
+DEBUG=false
+EOF
+
+# Start the containers
+docker-compose up -d</code></pre>
+
+    <h3>Manual Deployment</h3>
+    <p>
+      For manual deployment on a server:
+    </p>
+    <pre><code># Clone the repository
+git clone https://github.com/yourusername/salon-booking-service.git
+cd salon-booking-service
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variables
+export OPENAI_API_KEY=your_openai_api_key
+export WHATSAPP_API_URL=https://graph.facebook.com
+export WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
+export WHATSAPP_PHONE_NUMBER_ID=your_whatsapp_phone_number_id
+export WHATSAPP_VERIFY_TOKEN=your_verification_token
+export INITIALIZE_DB=true
+export DEBUG=false
+
+# Create and initialize the database
+export POSTGRES_USER=postgres
+export POSTGRES_PASSWORD=your_password
+export POSTGRES_DB=salon_booking
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+
+# Start the application
+uvicorn app.main:app --host 0.0.0.0 --port 8000</code></pre>
+
+    <div class="section-divider"></div>
+
+    <h2>WhatsApp Business API Integration</h2>
+
+    <h3>Setting Up WhatsApp Business API</h3>
+    <ol>
+      <li>Create a Facebook Developer account at <a href="https://developers.facebook.com/"
+          target="_blank">https://developers.facebook.com/</a></li>
+      <li>Create a new app and select the "Business" type</li>
+      <li>Add the "WhatsApp" product to your app</li>
+      <li>Follow the WhatsApp Business API setup instructions</li>
+      <li>Configure a webhook with the following details:
+        <ul>
+          <li>Callback URL: <code>https://your-api-domain.com/api/webhooks/whatsapp</code></li>
+          <li>Verify token: Use the same value as your <code>WHATSAPP_VERIFY_TOKEN</code> environment variable</li>
+          <li>Subscribed fields: <code>messages</code></li>
+        </ul>
+      </li>
+      <li>Obtain the Access Token and Phone Number ID from the WhatsApp dashboard</li>
+    </ol>
+
+    <h3>Sending Messages via WhatsApp</h3>
+    <p>
+      The API automatically sends responses back to users via WhatsApp after processing their messages.
+      If you need to send messages manually, you can make API calls to the WhatsApp Business API:
+    </p>
+    <pre><code>curl -X POST \
+  https://graph.facebook.com/v22.0/PHONE_NUMBER_ID/messages \
+  -H 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "messaging_product": "whatsapp",
+    "recipient_type": "individual",
+    "to": "RECIPIENT_PHONE_NUMBER",
+    "type": "text",
+    "text": {
+        "body": "Hello, this is a test message"
+    }
+}'</code></pre>
+
+    <div class="section-divider"></div>
+
+    <h2>Custom Messaging Platform Integration</h2>
+
+    <p>
+      To integrate with other messaging platforms (Telegram, custom chat applications, etc.):
+    </p>
+    <ol>
+      <li>Set up your messaging platform to receive messages</li>
+      <li>When a message is received, send it to the Beauty Salon Booking API's generic webhook:
+        <pre><code>curl -X POST \
+  https://your-api-domain.com/api/webhooks/message \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "phone_number": "+77771234567",
+    "message": "Hello, I want to book a haircut",
+    "message_type": "text",
+    "timestamp": "2025-03-08T12:00:00Z"
+}'</code></pre>
+      </li>
+      <li>Retrieve the response message from the conversation:
+        <pre><code>curl -X GET \
+  https://your-api-domain.com/api/conversations/phone/+77771234567 \
+  -H 'Content-Type: application/json'</code></pre>
+      </li>
+      <li>Implement your own mechanism to send responses back to the user via your messaging platform</li>
+    </ol>
+
+    <div class="section-divider"></div>
+
+    <h2>Managing Bookings</h2>
+
+    <h3>Retrieving Bookings</h3>
+    <p>
+      You can retrieve bookings via the API:
+    </p>
+    <pre><code># Get pending bookings
+curl -X GET https://your-api-domain.com/api/bookings?status=pending
+
+# Get bookings for a specific phone number
+curl -X GET https://your-api-domain.com/api/bookings?phone=+77771234567
+
+# Get a specific booking
+curl -X GET https://your-api-domain.com/api/bookings/123e4567-e89b-12d3-a456-426614174000</code></pre>
+
+    <h3>Updating Booking Status</h3>
+    <p>
+      You can update a booking's status to confirm or cancel it:
+    </p>
+    <pre><code>curl -X PUT \
+  https://your-api-domain.com/api/bookings/123e4567-e89b-12d3-a456-426614174000/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "confirmed"
+}'</code></pre>
+
+    <h3>Integration with Calendar Systems</h3>
+    <p>
+      To integrate with calendar systems like Google Calendar or Microsoft Outlook:
+    </p>
+    <ol>
+      <li>Set up a script to periodically fetch pending bookings from the API</li>
+      <li>Create calendar events using the booking information</li>
+      <li>Update booking status to "confirmed" once added to the calendar</li>
+    </ol>
+    <p>Example script (Python with Google Calendar API):</p>
+    <pre><code>import requests
+import datetime
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+# Fetch pending bookings
+response = requests.get('https://your-api-domain.com/api/bookings?status=pending')
+bookings = response.json()
+
+# Set up Google Calendar API
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+credentials = service_account.Credentials.from_service_account_file(
+    'service-account-file.json', scopes=SCOPES)
+calendar_service = build('calendar', 'v3', credentials=credentials)
+
+# Process each booking
+for booking in bookings:
+    # Create calendar event
+    event = {
+        'summary': f"Salon Appointment: {booking['client_name']} - {booking['service_description']}",
+        'description': f"Phone: {booking['phone']}\nService: {booking['service_description']}\nNotes: {booking['additional_notes']}",
+        'start': {
+            'dateTime': f"{booking['booking_date']}T{booking['booking_time']}:00",
+            'timeZone': 'Asia/Almaty',
+        },
+        'end': {
+            'dateTime': f"{booking['booking_date']}T{booking['booking_time'].split(':')[0]}:{int(booking['booking_time'].split(':')[1]) + 60}:00",
+            'timeZone': 'Asia/Almaty',
+        },
+    }
+    
+    calendar_event = calendar_service.events().insert(
+        calendarId='primary',
+        body=event
+    ).execute()
+    
+    # Update booking status to confirmed
+    requests.put(
+        f"https://your-api-domain.com/api/bookings/{booking['id']}/status",
+        json={"status": "confirmed"}
+    )</code></pre>
+
+    <div class="section-divider"></div>
+
+    <h2>Notification System Integration</h2>
+
+    <p>
+      You can build a notification system to alert salon staff about new bookings:
+    </p>
+    <ol>
+      <li>Set up a cron job or scheduled task to check for new bookings</li>
+      <li>Send notifications via email, SMS, or other channels</li>
+    </ol>
+    <p>Example script (Python with email notifications):</p>
+    <pre><code>import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import time
+
+# Email configuration
+SENDER_EMAIL = "notifications@yoursalon.com"
+SENDER_PASSWORD = "your_email_password"
+RECIPIENT_EMAIL = "staff@yoursalon.com"
+SMTP_SERVER = "smtp.yoursalon.com"
+SMTP_PORT = 587
+
+# Keep track of processed bookings
+processed_bookings = set()
+
+def send_email(subject, body):
+    message = MIMEMultipart()
+    message["From"] = SENDER_EMAIL
+    message["To"] = RECIPIENT_EMAIL
+    message["Subject"] = subject
+    
+    message.attach(MIMEText(body, "plain"))
+    
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.send_message(message)
+
+while True:
+    # Fetch pending bookings
+    response = requests.get('https://your-api-domain.com/api/bookings?status=pending')
+    bookings = response.json()
+    
+    # Check for new bookings
+    for booking in bookings:
+        if booking['id'] not in processed_bookings:
+            # Send notification email
+            subject = f"New Booking: {booking['client_name']}"
+            body = f"""
+New booking received:
+
+Client: {booking['client_name']}
+Phone: {booking['phone']}
+Service: {booking['service_description']}
+Date: {booking['booking_date']}
+Time: {booking['booking_time']}
+Notes: {booking['additional_notes']}
+
+Please confirm this booking in the system.
+"""
+            send_email(subject, body)
+            
+            # Mark as processed
+            processed_bookings.add(booking['id'])
+    
+    # Wait before checking again
+    time.sleep(60)  # Check every minute</code></pre>
+
+    <div class="section-divider"></div>
+
+    <h2>Troubleshooting</h2>
+
+    <h3>Common Issues</h3>
+    <ul>
+      <li>
+        <strong>Database connection failures:</strong>
+        <p>Check PostgreSQL credentials and ensure the database server is running.</p>
+      </li>
+      <li>
+        <strong>WhatsApp webhook verification failing:</strong>
+        <p>Verify that the WHATSAPP_VERIFY_TOKEN matches what you configured in the Meta Developer Dashboard.</p>
+      </li>
+      <li>
+        <strong>Messages not being processed:</strong>
+        <p>Enable DEBUG mode and check application logs for errors.</p>
+      </li>
+      <li>
+        <strong>OpenAI API errors:</strong>
+        <p>Verify your OpenAI API key and check for rate limiting or quota issues.</p>
+      </li>
+    </ul>
+
+    <h3>Logs and Debugging</h3>
+    <p>
+      The API logs information to stdout/stderr. In Docker environments, you can view logs with:
+    </p>
+    <pre><code>docker-compose logs -f web</code></pre>
+    <p>
+      For more detailed logging, set <code>DEBUG=True</code> in your environment variables.
+    </p>
+
+    <div class="section-divider"></div>
+
+    <h2>Security Considerations</h2>
+
+    <p>
+      When deploying the API in production, consider the following security measures:
+    </p>
+    <ul>
+      <li>Use HTTPS for all API endpoints</li>
+      <li>Implement proper API key validation for admin endpoints</li>
+      <li>Verify webhook signatures for WhatsApp integration</li>
+      <li>Use secure environment variables for sensitive information</li>
+      <li>Implement rate limiting to prevent abuse</li>
+      <li>Regularly update dependencies and apply security patches</li>
+    </ul>
+
+    <h3>WhatsApp Signature Verification</h3>
+    <p>
+      For production deployments, enable WhatsApp signature verification by setting up the proper handling of the
+      X-Hub-Signature header.
+    </p>
+
+    <div class="section-divider"></div>
+
+    <footer class="mt-5 text-center text-muted">
+      <p>&copy; 2025 Beauty Salon Booking API</p>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>

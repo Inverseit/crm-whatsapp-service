@@ -68,7 +68,7 @@ class BookingRepository:
         return [Booking.model_validate(row) for row in rows]
     
     @staticmethod
-    async def update(booking_id: UUID, booking_update: BookingUpdate) -> Optional[Booking]:
+    async def update(booking_id: UUID, booking_update: BookingUpdate | dict) -> Optional[Booking]:
         """Update a booking."""
         # First check if booking exists
         booking = await BookingRepository.get_by_id(booking_id)
@@ -81,6 +81,8 @@ class BookingRepository:
         param_idx = 2  # Start parameter index at 2
         
         # For each field in the update model, add it to the query if it's not None
+        if isinstance(booking_update, dict):
+            booking_update = BookingUpdate(**booking_update)
         fields = booking_update.model_dump(exclude_none=True)
         for field_name, value in fields.items():
             # Handle enum values

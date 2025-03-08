@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4o")
     
     # WhatsApp API settings
-    whatsapp_api_url: str = Field(default="https://graph.facebook.com/v17.0")
+    whatsapp_api_url: str = Field(default="https://graph.facebook.com/v22.0")
     whatsapp_api_key: str = Field(default="")
     whatsapp_phone_number_id: str = Field(default="")
     whatsapp_verify_token: str = Field(default="your_verification_token")
