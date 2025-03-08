@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     whatsapp_greeting_template: str = Field(default="greeting")
     whatsapp_template_language_code: str = Field(default="en_US")
     
+    BACKEND_URL: str = Field(default="http://localhost:8000")
+    AUTH_EMAIL: str = Field(default="")
+    AUTH_PASSWORD: str = Field(default="")
     
     # App settings
     debug: bool = Field(default=False)

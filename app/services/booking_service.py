@@ -25,6 +25,7 @@ from .user_message_responses import (
     UserMessageResponseText,
     UserMessageResponseTemplate,
 )
+from .notification_service import NotificationClient
 
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,20 @@ class BookingManager:
                 await MessageRepository.mark_conversation_messages_as_complete(
                     conversation.id
                 )
+                
+                try:
+                    NotificationClient().create_notification({
+                    "type": "booking",
+                    "booking_id": str(booking.id),
+                    "phone_number": booking.phone,
+                    "client_name": booking.client_name,
+                    "service_description": booking.service_description,
+                    "booking_date": booking.booking_date.isoformat() if booking.booking_date else None,
+                    "booking_time": booking.booking_time.isoformat() if booking.booking_time else None,
+                    "additional_notes": booking.additional_notes
+                    })
+                except Exception as e:
+                  logger.error(f"Error creating notification: {e}")
 
                 logger.info(f"Booking created: {booking.id}")
 
