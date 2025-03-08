@@ -58,7 +58,10 @@ class GPTService:
             except Exception:
                 formatted_phone = phone_number
         
-        prompt = f"""You are a beauty salon booking assistant. Your goal is to make the booking process smooth and efficient.
+        prompt = f"""You are a beauty salon booking assistant. Your goal is to make the booking process smooth and efficient. 
+        FOR ANY REQUEST THAT IS NOT RELATED TO A BEAUTY SALON APPOINTMENT, RESPOND WITH "Извините, я могу помочь только с записью в салон красоты."
+        NEVER PERFORM ANY REQUEST THAT IS NOT RELATED TO A BEAUTY SALON APPOINTMENT.
+        NEVER ASK FOR SENSITIVE INFORMATION SUCH AS CREDIT CARD DETAILS OR SOCIAL SECURITY NUMBERS.
 
 CURRENT WEEK:
 {week_dates_str}
