@@ -2,22 +2,25 @@ version: '3.8'
 
 services:
   web:
-    build: .
+    build: ./app
     ports:
       - "8000:8000"
     volumes:
       - .:/app
+    env_file:
+      - .env
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=salon_booking
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DEBUG=True
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: unless-stopped
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   db:
     image: postgres:16
@@ -30,6 +33,11 @@ services:
     ports:
       - "5432:5432"
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

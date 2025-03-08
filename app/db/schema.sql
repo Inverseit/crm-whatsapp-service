@@ -4,11 +4,23 @@ DROP TABLE IF EXISTS booking CASCADE;
 DROP TABLE IF EXISTS conversation CASCADE;
 
 -- Create enum types
-CREATE TYPE message_type AS ENUM ('text', 'image', 'document', 'location');
-CREATE TYPE time_of_day AS ENUM ('morning', 'afternoon', 'evening');
-CREATE TYPE contact_method AS ENUM ('phone_call', 'whatsapp_message');
-CREATE TYPE booking_status AS ENUM ('pending', 'confirmed', 'cancelled');
-CREATE TYPE conversation_state AS ENUM ('greeting', 'collecting_info', 'confirming', 'completed');
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'message_type') THEN
+    CREATE TYPE message_type AS ENUM ('text', 'image', 'document', 'location');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'time_of_day') THEN
+    CREATE TYPE time_of_day AS ENUM ('morning', 'afternoon', 'evening');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'contact_method') THEN
+    CREATE TYPE contact_method AS ENUM ('phone_call', 'whatsapp_message');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'booking_status') THEN
+    CREATE TYPE booking_status AS ENUM ('pending', 'confirmed', 'cancelled');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'conversation_state') THEN
+    CREATE TYPE conversation_state AS ENUM ('greeting', 'collecting_info', 'confirming', 'completed');
+  END IF;
+END $$;
 
 -- Create conversations table
 CREATE TABLE conversation (
