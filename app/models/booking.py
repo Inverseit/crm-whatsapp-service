@@ -41,20 +41,22 @@ class PhoneNumber(BaseModel):
     @field_validator('number')
     @classmethod
     def validate_phone(cls, v: str) -> str:
-        """Validate and normalize a phone number to E.164 format."""
-        try:
-            # Parse phone number with phonenumbers library
-            v = v.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-            
-            # Parse and validate the phone number
-            phone_number = phonenumbers.parse(v)
-            if not phonenumbers.is_valid_number(phone_number):
-                raise ValueError('Invalid phone number format')
-            
-            # Format to E164 format for consistency
-            return phonenumbers.format_number(phone_number, phonenumbers.PhoneNumberFormat.E164)
-        except Exception as e:
-            raise ValueError(f'Invalid phone number format: {e}')
+      """Validate and normalize a phone number to E.164 format."""
+      try:
+        # Parse phone number with phonenumbers library
+        v = v.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        
+        # Parse and validate the phone number
+        phone_number = phonenumbers.parse(v)
+        if not phonenumbers.is_valid_number(phone_number):
+          raise ValueError('Invalid phone number format')
+        
+        # Format to E164 format for consistency
+        return phonenumbers.format_number(phone_number, phonenumbers.PhoneNumberFormat.E164)
+      except Exception as e:
+        # Log the error but still return the original number
+        print(f'Error formatting phone number: {e}')
+        return v
 
 class ContactInfo(BaseModel):
     """Contact information for a client."""

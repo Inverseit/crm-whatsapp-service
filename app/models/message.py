@@ -18,6 +18,7 @@ class Message(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     sender_id: str
     is_from_bot: bool = False
+    is_complete: bool = False # We mark true when we have confirmed a booking.
     
     model_config = ConfigDict(from_attributes=True)
 

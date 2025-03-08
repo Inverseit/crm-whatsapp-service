@@ -175,7 +175,7 @@ When all information is collected AND confirmed, use the collect_booking_info fu
             }
         ]
     
-    async def get_conversation_history(self, conversation_id: UUID) -> List[Dict[str, Any]]:
+    async def get_conversation_history(self, conversation_id: UUID, phone_number: str | None) -> List[Dict[str, Any]]:
         """
         Retrieve conversation history from the database and format it for GPT.
         
@@ -187,11 +187,11 @@ When all information is collected AND confirmed, use the collect_booking_info fu
         """
         try:
             # Get messages from the database
-            messages = await MessageRepository.get_conversation_history(conversation_id)
+            messages = await MessageRepository.get_conversation_history(conversation_id, only_complete=True)
             
             # Start with system message
             history = [
-                {"role": "system", "content": self._create_system_prompt(None)}
+                {"role": "system", "content": self._create_system_prompt(phone_number)}
             ]
             
             # Add each message to the history
@@ -230,7 +230,7 @@ When all information is collected AND confirmed, use the collect_booking_info fu
         except Exception as e:
             logger.error(f"Error retrieving conversation history: {e}", exc_info=True)
             # Return a basic history with just the system message
-            return [{"role": "system", "content": self._create_system_prompt(None)}]
+            return [{"role": "system", "content": self._create_system_prompt(phone_number)}]
     
     async def process_message(self, conversation_id: UUID, message: str, phone_number: Optional[str] = None) -> Tuple[str, Optional[BookingFunctionArgs]]:
         """
@@ -246,7 +246,7 @@ When all information is collected AND confirmed, use the collect_booking_info fu
         """
         try:
             # Get conversation history from the database
-            history = await self.get_conversation_history(conversation_id)
+            history = await self.get_conversation_history(conversation_id, phone_number)
             
             # Update system message with phone number if provided
             if phone_number and history and len(history) > 0 and history[0].get("role") == "system":
@@ -274,7 +274,7 @@ When all information is collected AND confirmed, use the collect_booking_info fu
             else:
                 # Fallback - should not normally happen
                 logger.warning("Unexpected response format from OpenAI")
-                response_content = "Извините, произошла ошибка в обработке сообщения."
+                response_content = "Извините, произошла ошибка в обработке сообщения. Менеджер уже уведомлен и скоро свяжется с вами."
             
             # If there's a function call, extract booking data
             if function_call and function_call.name == "collect_booking_info":

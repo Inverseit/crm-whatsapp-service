@@ -67,6 +67,7 @@ CREATE TABLE message (
     timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     sender_id VARCHAR(255) NOT NULL,
     is_from_bot BOOLEAN NOT NULL DEFAULT FALSE
+    is_complete BOOLEAN NOT NULL DEFAULT FALSE;
 );
 
 -- Create index on conversation_id and timestamp for faster message history retrieval

@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     whatsapp_api_key: str = Field(default="")
     whatsapp_phone_number_id: str = Field(default="")
     whatsapp_verify_token: str = Field(default="your_verification_token")
+    whatsapp_greeting_template: str = Field(default="greeting")
+    whatsapp_template_language_code: str = Field(default="en_US")
+    
     
     # App settings
     debug: bool = Field(default=False)

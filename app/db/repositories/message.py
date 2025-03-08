@@ -64,12 +64,22 @@ class MessageRepository:
         return count
     
     @staticmethod
-    async def get_conversation_history(conversation_id: UUID) -> List[Message]:
-        """Get all messages for a conversation in order."""
-        query = "SELECT * FROM message WHERE conversation_id = $1 ORDER BY timestamp ASC"
+    async def get_conversation_history(conversation_id: UUID, only_complete = False) -> List[Message]:
+        """Get all active messages for a conversation in order."""
+        only_complete_query = """
+        SELECT * FROM message 
+        WHERE conversation_id = $1 AND is_complete = FALSE 
+        ORDER BY timestamp ASC
+        """
+        all_query = """
+        SELECT * FROM message
+        WHERE conversation_id = $1
+        ORDER BY timestamp ASC
+        """
+        query = only_complete_query if only_complete else all_query
         rows = await db.fetch(query, conversation_id)
         return [Message.model_validate(row) for row in rows]
-    
+        
     @staticmethod
     async def delete(message_id: UUID) -> bool:
         """Delete a message."""
@@ -81,5 +91,26 @@ class MessageRepository:
     async def delete_by_conversation(conversation_id: UUID) -> int:
         """Delete all messages for a conversation and return the count of deleted messages."""
         query = "DELETE FROM message WHERE conversation_id = $1 RETURNING id"
+        rows = await db.fetch(query, conversation_id)
+        return len(rows)
+      
+    @staticmethod
+    async def mark_conversation_messages_as_complete(conversation_id: UUID) -> int:
+        """
+        Mark all messages in a conversation as 'complete' when a booking is finalized.
+        This helps to separate old conversations from new ones.
+        
+        Args:
+            conversation_id: The conversation ID
+            
+        Returns:
+            Number of messages marked as complete
+        """
+        query = """
+        UPDATE message 
+        SET is_complete = TRUE 
+        WHERE conversation_id = $1 AND is_complete = FALSE
+        RETURNING id
+        """
         rows = await db.fetch(query, conversation_id)
         return len(rows)

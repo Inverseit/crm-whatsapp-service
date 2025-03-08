@@ -89,6 +89,65 @@ class WhatsAppService:
             logger.error(f"Error sending WhatsApp message: {e}")
             raise
     
+    async def send_template_message(self, to: str, template_name: str, template_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send a template message via WhatsApp.
+        
+        Args:
+            to: The recipient's phone number in E.164 format
+            template_name: The template name
+            template_data: The template data
+            
+        Returns:
+            The API response
+        """
+        # Clean the phone number
+        to = to.strip()
+        if not to.startswith("+"):
+            to = "+" + to
+            
+        # Build the request payload
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "template",
+            "template": {
+                "name": template_name,
+            }
+        }
+        # Add language code to the template payload
+        payload["template"]["language"] = {"code": settings.whatsapp_template_language_code}
+        
+        if template_data:
+            payload["template"]["data"] = template_data
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.config.api_key}"
+        }
+        
+        api_url = f"{self.config.api_url}/{self.config.phone_number_id}/messages"
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=10.0
+                )
+                
+                response.raise_for_status()
+                return response.json()
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"WhatsApp API error: {e.response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp template message: {e}")
+            raise
+    
     async def parse_webhook(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Parse incoming webhook data from WhatsApp.

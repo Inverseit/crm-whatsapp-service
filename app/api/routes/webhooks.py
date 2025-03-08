@@ -9,6 +9,7 @@ from app.services.booking_service import BookingManager
 from app.services.whatsapp_service import WhatsAppService
 from app.api.dependencies import get_booking_manager, get_whatsapp_service
 from app.config import settings
+from app.services.user_message_responses import MessageType, UserMessageResponseText, UserMessageResponseTemplate
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
@@ -180,46 +181,6 @@ async def receive_whatsapp_webhook(
         }
     }
 )
-async def receive_message(
-    webhook: WebhookMessage,
-    background_tasks: BackgroundTasks,
-    booking_manager: BookingManager = Depends(get_booking_manager)
-) -> JSONResponse:
-    """
-    Receive a message from a generic messaging service webhook.
-    
-    Args:
-        webhook: The webhook message
-        background_tasks: FastAPI background tasks
-        booking_manager: The booking manager service
-        
-    Returns:
-        A JSON response
-    """
-    try:
-        # Log the incoming webhook
-        logger.info(f"Received webhook message from {webhook.phone_number}: {webhook.message}")
-        
-        # Process the message in the background
-        background_tasks.add_task(
-            process_message,
-            booking_manager,
-            webhook.phone_number,
-            webhook.message
-        )
-        
-        # Return immediate success to the webhook caller
-        return JSONResponse(
-            status_code=200,
-            content={"status": "success", "message": "Message received"}
-        )
-    
-    except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": str(e)}
-        )
 
 @router.get("/test", 
     summary="Test Webhook Processing",
@@ -245,7 +206,7 @@ async def test_webhook() -> JSONResponse:
         status_code=200, 
         content={"status": "success", "message": "Test webhook received"}
     )
-
+    
 async def process_whatsapp_message(
     booking_manager: BookingManager,
     phone_number: str,
@@ -268,15 +229,37 @@ async def process_whatsapp_message(
             message_text=message
         )
         
-        logger.info(f"Processed WhatsApp message from {phone_number}, response: {response[:50]}...")
+        logger.info(f"Processed WhatsApp message from {phone_number}, response: {response}...")
         
         # Send the response back to the user via WhatsApp
         if should_send:
-            success = await booking_manager.send_response(phone_number, response)
-            if success:
-                logger.info(f"Sent WhatsApp response to {phone_number}")
-            else:
-                logger.error(f"Failed to send WhatsApp response to {phone_number}")
+            task = None
+            try:
+              match response.message_type:
+                  case MessageType.TEXT:
+                      # Send a text message
+                      logger.info(f"Sending text response to {phone_number}")
+                      text_response: UserMessageResponseText = response
+                      task = booking_manager.send_text_response(phone_number,text_response.text)
+                  case MessageType.TEMPLATE:
+                      # Send a template message
+                      logger.info(f"Sending template response to {phone_number}")
+                      template_response: UserMessageResponseTemplate = response
+                      task = booking_manager.send_response_template(phone_number,template_response.template_name,template_response.template_data)
+                  case _:
+                      logger.warning("Unsupported message type")
+                      return
+            except Exception as e:
+                logger.error(f"Error sending WhatsApp response: {e}")
+                if type(response) is str:
+                    logger.info(f"FALLBACK: Sending text response to {phone_number}")
+                    task = booking_manager.send_text_response(phone_number, response)
+            if task:
+                success = await task
+                if success:
+                    logger.info(f"Sent WhatsApp response to {phone_number}")
+                else:
+                    logger.error(f"Failed to send WhatsApp response to {phone_number}")
         
     except Exception as e:
         logger.error(f"Error processing WhatsApp message in background: {e}", exc_info=True)
@@ -297,7 +280,7 @@ async def process_message(
     try:
         # Process the message with the booking manager
         response, _ = await booking_manager.process_user_message(phone_number, message)
-        logger.info(f"Processed message from {phone_number}, response: {response[:50]}...")
+        logger.info(f"Processed message from {phone_number}, response: {response}...")
         
         # Here you would typically integrate with your messaging platform to send the response
         
