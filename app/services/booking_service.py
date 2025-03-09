@@ -186,6 +186,9 @@ class BookingManager:
                     "service_description": booking.service_description,
                     "booking_date": booking.booking_date.isoformat() if booking.booking_date else None,
                     "booking_time": booking.booking_time.isoformat() if booking.booking_time else None,
+                    "time_of_day": booking.time_of_day.value if booking.time_of_day else None,
+                    "preferred_contact_method": booking.preferred_contact_method.value,
+                    "preferred_contact_time": booking.preferred_contact_time.value if booking.preferred_contact_time else None,
                     "additional_notes": booking.additional_notes
                     })
                 except Exception as e:
