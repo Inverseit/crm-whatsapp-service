@@ -30,4 +30,16 @@ A FastAPI-based backend service for beauty salon bookings powered by OpenAI GPT.
    ```
 
 2. Create a `.env` file with your configuration:
-   ```
+   ```ini
+   OPENAI_API_KEY=
+   WHATSAPP_API_URL=https://graph.facebook.com/v22.0
+   WHATSAPP_PHONE_NUMBER_ID= 
+   WHATSAPP_VERIFY_TOKEN= *Set up in the the dashboard*
+   WHATSAPP_API_KEY=
+   INITIALIZE_DB=false *Should I create (or recreate - db (drop tables) when restarting)*
+   WHATSAPP_GREETING_TEMPLATE=hello_world *Set up in the the dashboard*
+   WHATSAPP_TEMPLATE_LANGUAGE_CODE=en_US *Set up in the the dashboard*
+   BACKEND_URL=https://dev.crm-beauty-salon... *backend url*
+   AUTH_EMAIL=xxx@gmail.com *backend email*
+   AUTH_PASSWORD=xxxx *backend password*
+```
