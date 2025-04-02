@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 import phonenumbers
 
 from app.db.connection import db
-from app.models.conversation import Conversation, ConversationCreate, ConversationUpdate, ConversationState
+from app.models.conversation import Conversation, ConversationCreate, ConversationUpdate, ConversationState, MessagingPlatform
 
 class ConversationRepository:
     """Repository for conversation data access operations."""
@@ -13,27 +13,38 @@ class ConversationRepository:
         """Create a new conversation in the database."""
         query = """
         INSERT INTO conversation (
-            id, phone_number, state, is_complete
+            id, phone_number, whatsapp_id, telegram_id, telegram_chat_id, 
+            primary_platform, state, is_complete
         ) VALUES (
-            $1, $2, $3, $4
+            $1, $2, $3, $4, $5, $6, $7, $8
         ) RETURNING *
         """
         
-        # Normalize phone number
+        # Normalize phone number if provided
         phone_number = conversation.phone_number
-        try:
-            parsed_number = phonenumbers.parse(phone_number, "KZ")
-            if phonenumbers.is_valid_number(parsed_number):
-                phone_number = phonenumbers.format_number(
-                    parsed_number, phonenumbers.PhoneNumberFormat.E164
-                )
-        except Exception:
-            pass  # Use the original number if parsing fails
+        if phone_number:
+            try:
+                parsed_number = phonenumbers.parse(phone_number, "KZ")
+                if phonenumbers.is_valid_number(parsed_number):
+                    phone_number = phonenumbers.format_number(
+                        parsed_number, phonenumbers.PhoneNumberFormat.E164
+                    )
+            except Exception:
+                pass  # Use the original number if parsing fails
+        
+        # Set WhatsApp ID to phone number if not provided
+        whatsapp_id = conversation.whatsapp_id
+        if not whatsapp_id and conversation.primary_platform == MessagingPlatform.WHATSAPP:
+            whatsapp_id = phone_number
         
         conversation_id = uuid4()
         values = (
             conversation_id,
             phone_number,
+            whatsapp_id,
+            conversation.telegram_id,
+            conversation.telegram_chat_id,
+            conversation.primary_platform.value,
             conversation.state.value,
             conversation.is_complete
         )
@@ -77,6 +88,33 @@ class ConversationRepository:
         return None
     
     @staticmethod
+    async def get_by_whatsapp_id(whatsapp_id: str) -> Optional[Conversation]:
+        """Get a conversation by WhatsApp ID."""
+        query = "SELECT * FROM conversation WHERE whatsapp_id = $1"
+        row = await db.fetchrow(query, whatsapp_id)
+        if row:
+            return Conversation.model_validate(row)
+        return None
+    
+    @staticmethod
+    async def get_by_telegram_id(telegram_id: str) -> Optional[Conversation]:
+        """Get a conversation by Telegram user ID."""
+        query = "SELECT * FROM conversation WHERE telegram_id = $1"
+        row = await db.fetchrow(query, telegram_id)
+        if row:
+            return Conversation.model_validate(row)
+        return None
+    
+    @staticmethod
+    async def get_by_telegram_chat_id(telegram_chat_id: str) -> Optional[Conversation]:
+        """Get a conversation by Telegram chat ID."""
+        query = "SELECT * FROM conversation WHERE telegram_chat_id = $1"
+        row = await db.fetchrow(query, telegram_chat_id)
+        if row:
+            return Conversation.model_validate(row)
+        return None
+    
+    @staticmethod
     async def get_all() -> List[Conversation]:
         """Get all conversations."""
         query = "SELECT * FROM conversation ORDER BY last_updated DESC"
@@ -102,7 +140,7 @@ class ConversationRepository:
         fields = conversation_update.model_dump(exclude_none=True)
         for field_name, value in fields.items():
             # Handle enum values
-            if isinstance(value, ConversationState):
+            if isinstance(value, (ConversationState, MessagingPlatform)):
                 value = value.value
                 
             update_parts.append(f"{field_name} = ${param_idx}")
@@ -138,13 +176,76 @@ class ConversationRepository:
         return [Conversation.model_validate(row) for row in rows]
     
     @staticmethod
-    async def get_or_create(phone_number: str) -> Conversation:
-        """Get an existing conversation by phone or create a new one."""
-        conversation = await ConversationRepository.get_by_phone(phone_number)
-        if conversation:
-            return conversation
+    async def find_or_create_conversation(
+        platform: MessagingPlatform,
+        contact_info: Dict[str, str]
+    ) -> Conversation:
+        """
+        Find an existing conversation by platform-specific identifiers or create a new one.
         
-        new_conversation = ConversationCreate(
-            phone_number=phone_number
-        )
-        return await ConversationRepository.create(new_conversation)
+        Args:
+            platform: The messaging platform
+            contact_info: Dictionary with platform-specific identifiers
+                (phone_number, whatsapp_id, telegram_id, telegram_chat_id)
+                
+        Returns:
+            An existing or new conversation
+        """
+        conversation = None
+        
+        # Try to find conversation based on platform
+        if platform == MessagingPlatform.WHATSAPP:
+            # For WhatsApp, try to find by WhatsApp ID or phone number
+            whatsapp_id = contact_info.get("whatsapp_id", "")
+            phone_number = contact_info.get("phone_number", "")
+            
+            if whatsapp_id:
+                conversation = await ConversationRepository.get_by_whatsapp_id(whatsapp_id)
+            
+            if not conversation and phone_number:
+                conversation = await ConversationRepository.get_by_phone(phone_number)
+                
+        elif platform == MessagingPlatform.TELEGRAM:
+            # For Telegram, try to find by chat ID or user ID
+            telegram_chat_id = contact_info.get("telegram_chat_id", "")
+            telegram_id = contact_info.get("telegram_id", "")
+            
+            if telegram_chat_id:
+                conversation = await ConversationRepository.get_by_telegram_chat_id(telegram_chat_id)
+            
+            if not conversation and telegram_id:
+                conversation = await ConversationRepository.get_by_telegram_id(telegram_id)
+        
+        # If conversation not found, create a new one
+        if not conversation:
+            # Create new conversation
+            new_conversation = ConversationCreate(
+                phone_number=contact_info.get("phone_number", ""),
+                whatsapp_id=contact_info.get("whatsapp_id", ""),
+                telegram_id=contact_info.get("telegram_id", ""),
+                telegram_chat_id=contact_info.get("telegram_chat_id", ""),
+                primary_platform=platform
+            )
+            conversation = await ConversationRepository.create(new_conversation)
+        
+        # Update missing fields if needed
+        update_fields = {}
+        
+        # Determine which fields need to be updated
+        if platform == MessagingPlatform.WHATSAPP:
+            if contact_info.get("whatsapp_id") and not conversation.whatsapp_id:
+                update_fields["whatsapp_id"] = contact_info["whatsapp_id"]
+            if contact_info.get("phone_number") and not conversation.phone_number:
+                update_fields["phone_number"] = contact_info["phone_number"]
+        
+        elif platform == MessagingPlatform.TELEGRAM:
+            if contact_info.get("telegram_id") and not conversation.telegram_id:
+                update_fields["telegram_id"] = contact_info["telegram_id"]
+            if contact_info.get("telegram_chat_id") and not conversation.telegram_chat_id:
+                update_fields["telegram_chat_id"] = contact_info["telegram_chat_id"]
+        
+        # Update the conversation with any new information
+        if update_fields:
+            conversation = await ConversationRepository.update(conversation.id, update_fields)
+        
+        return conversation

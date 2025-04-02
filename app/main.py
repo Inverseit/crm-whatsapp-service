@@ -26,7 +26,7 @@ This API powers a beauty salon booking system with GPT-powered conversations.
 
 ### Features
 
-* WhatsApp integration
+* Multi-platform messaging integration (WhatsApp, Telegram)
 * Conversational booking flow
 * Booking management
 * Conversation history
@@ -116,7 +116,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database connection on startup."""
+    """Initialize database connection and messaging webhooks on startup."""
     logger.info("Starting up the application")
     await db.connect()
     
@@ -130,12 +130,58 @@ async def startup_event():
             await db.init_db()
         else:
             logger.warning("Skipping database initialization. Set INITIALIZE_DB=true if you want to initialize the database.")
+    
+    # Set up Telegram webhook if Telegram token is configured
+    if settings.telegram_api_token:
+        try:
+            from app.services.messaging.factory import MessagingFactory
+            
+            # Use the BACKEND_URL from settings if available
+            base_url = settings.SELF_BACKEND_URL
+            if base_url:
+                # Remove trailing slash if present
+                base_url = base_url.rstrip('/')
+                
+                # Set up Telegram webhook
+                telegram_transport = MessagingFactory.get_transport("telegram")
+                if telegram_transport and hasattr(telegram_transport, "set_webhook"):
+                    webhook_url = f"{base_url}/api/webhooks/telegram"
+                    success = await telegram_transport.set_webhook(webhook_url)
+                    if success:
+                        logger.info(f"Successfully set up Telegram webhook at {webhook_url}")
+                    else:
+                        logger.warning("Failed to set up Telegram webhook")
+                else:
+                    logger.warning("Telegram transport not available or doesn't support set_webhook")
+            else:
+                logger.warning("BACKEND_URL not set, skipping Telegram webhook setup")
+        except Exception as e:
+            logger.error(f"Error setting up Telegram webhook: {e}", exc_info=True)
+    else:
+        logger.info("Telegram API token not configured, skipping Telegram webhook setup")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Close database connection on shutdown."""
+    """Close database connection and clean up messaging resources on shutdown."""
     logger.info("Shutting down the application")
+    
+    # Close database connection
     await db.disconnect()
+    
+    # Clean up Telegram webhook if configured
+    if settings.telegram_api_token:
+        try:
+            from app.services.messaging.factory import MessagingFactory
+            
+            # Clean up Telegram webhook
+            telegram_transport = MessagingFactory.get_transport("telegram")
+            if telegram_transport and hasattr(telegram_transport, "delete_webhook"):
+                if await telegram_transport.delete_webhook():
+                    logger.info("Successfully deleted Telegram webhook")
+                else:
+                    logger.warning("Failed to delete Telegram webhook")
+        except Exception as e:
+            logger.error(f"Error cleaning up Telegram webhook: {e}", exc_info=True)
 
 @app.get("/", include_in_schema=False)
 async def root():

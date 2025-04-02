@@ -4,6 +4,7 @@ from datetime import datetime
 
 from app.db.connection import db
 from app.models.message import Message, MessageCreate, MessageType
+from app.models.conversation import MessagingPlatform
 
 class MessageRepository:
     """Repository for message data access operations."""
@@ -13,9 +14,9 @@ class MessageRepository:
         """Create a new message in the database."""
         query = """
         INSERT INTO message (
-            id, conversation_id, content, message_type, timestamp, sender_id, is_from_bot
+            id, conversation_id, content, message_type, timestamp, sender_id, is_from_bot, platform
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7
+            $1, $2, $3, $4, $5, $6, $7, $8
         ) RETURNING *
         """
         
@@ -29,7 +30,8 @@ class MessageRepository:
             message.message_type.value,
             timestamp,
             message.sender_id,
-            message.is_from_bot
+            message.is_from_bot,
+            message.platform.value
         )
         
         row = await db.fetchrow(query, *values)
@@ -57,6 +59,23 @@ class MessageRepository:
         return [Message.model_validate(row) for row in rows]
     
     @staticmethod
+    async def get_by_conversation_and_platform(
+        conversation_id: UUID, 
+        platform: MessagingPlatform,
+        limit: int = 100, 
+        offset: int = 0
+    ) -> List[Message]:
+        """Get messages for a conversation from a specific platform with pagination."""
+        query = """
+        SELECT * FROM message 
+        WHERE conversation_id = $1 AND platform = $2
+        ORDER BY timestamp ASC
+        LIMIT $3 OFFSET $4
+        """
+        rows = await db.fetch(query, conversation_id, platform.value, limit, offset)
+        return [Message.model_validate(row) for row in rows]
+    
+    @staticmethod
     async def count_by_conversation(conversation_id: UUID) -> int:
         """Count the number of messages in a conversation."""
         query = "SELECT COUNT(*) FROM message WHERE conversation_id = $1"
@@ -64,20 +83,41 @@ class MessageRepository:
         return count
     
     @staticmethod
-    async def get_conversation_history(conversation_id: UUID, only_complete = False) -> List[Message]:
-        """Get all active messages for a conversation in order."""
-        only_complete_query = """
-        SELECT * FROM message 
-        WHERE conversation_id = $1 AND is_complete = FALSE 
-        ORDER BY timestamp ASC
-        """
-        all_query = """
-        SELECT * FROM message
-        WHERE conversation_id = $1
-        ORDER BY timestamp ASC
-        """
-        query = only_complete_query if only_complete else all_query
-        rows = await db.fetch(query, conversation_id)
+    async def get_conversation_history(
+        conversation_id: UUID, 
+        only_complete: bool = False,
+        platform: Optional[MessagingPlatform] = None
+    ) -> List[Message]:
+        """Get all active messages for a conversation in order, optionally filtered by platform."""
+        if only_complete and platform:
+            query = """
+            SELECT * FROM message 
+            WHERE conversation_id = $1 AND is_complete = FALSE AND platform = $2
+            ORDER BY timestamp ASC
+            """
+            rows = await db.fetch(query, conversation_id, platform.value)
+        elif only_complete:
+            query = """
+            SELECT * FROM message 
+            WHERE conversation_id = $1 AND is_complete = FALSE 
+            ORDER BY timestamp ASC
+            """
+            rows = await db.fetch(query, conversation_id)
+        elif platform:
+            query = """
+            SELECT * FROM message
+            WHERE conversation_id = $1 AND platform = $2
+            ORDER BY timestamp ASC
+            """
+            rows = await db.fetch(query, conversation_id, platform.value)
+        else:
+            query = """
+            SELECT * FROM message
+            WHERE conversation_id = $1
+            ORDER BY timestamp ASC
+            """
+            rows = await db.fetch(query, conversation_id)
+            
         return [Message.model_validate(row) for row in rows]
         
     @staticmethod
@@ -113,4 +153,25 @@ class MessageRepository:
         RETURNING id
         """
         rows = await db.fetch(query, conversation_id)
+        return len(rows)
+    
+    @staticmethod
+    async def mark_platform_messages_as_complete(conversation_id: UUID, platform: MessagingPlatform) -> int:
+        """
+        Mark all messages from a specific platform in a conversation as 'complete'.
+        
+        Args:
+            conversation_id: The conversation ID
+            platform: The messaging platform
+            
+        Returns:
+            Number of messages marked as complete
+        """
+        query = """
+        UPDATE message 
+        SET is_complete = TRUE 
+        WHERE conversation_id = $1 AND platform = $2 AND is_complete = FALSE
+        RETURNING id
+        """
+        rows = await db.fetch(query, conversation_id, platform.value)
         return len(rows)

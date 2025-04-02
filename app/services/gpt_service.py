@@ -10,6 +10,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from app.models.booking import BookingFunctionArgs
 from app.models.message import Message, MessageType, MessageCreate
+from app.models.conversation import MessagingPlatform
 from app.db.repositories.message import MessageRepository
 from app.utils import format_phone_for_display
 
@@ -22,12 +23,13 @@ class GPTService:
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
     
-    def _create_system_prompt(self, phone_number: Optional[str] = None) -> str:
+    def _create_system_prompt(self, contact_id: Optional[str] = None, platform: Optional[MessagingPlatform] = None) -> str:
         """
         Create a system prompt for the chat completion API.
         
         Args:
-            phone_number: The user's phone number, if known
+            contact_id: The user's contact identifier
+            platform: The messaging platform
             
         Returns:
             A system prompt string
@@ -50,14 +52,26 @@ class GPTService:
         
         week_dates_str = "\n".join(week_dates)
         
-        formatted_phone = "неизвестен"
-        if phone_number:
-            try:
-                # Try to format the phone number properly for display
-                formatted_phone = format_phone_for_display(phone_number)
-            except Exception:
-                formatted_phone = phone_number
+        contact_info = "неизвестен"
+        platform_name = "неизвестной платформы"
         
+        if contact_id:
+            try:
+                # Try to format the contact info properly for display
+                contact_info = contact_id
+                
+                # If it's a phone number, format it better
+                if platform == MessagingPlatform.WHATSAPP and contact_id.startswith("+"):
+                    contact_info = format_phone_for_display(contact_id)
+            except Exception:
+                contact_info = contact_id
+                
+        if platform:
+            if platform == MessagingPlatform.WHATSAPP:
+                platform_name = "WhatsApp"
+            elif platform == MessagingPlatform.TELEGRAM:
+                platform_name = "Telegram"
+                
         prompt = f"""You are a beauty salon booking assistant. Your goal is to make the booking process smooth and efficient. 
         FOR ANY REQUEST THAT IS NOT RELATED TO A BEAUTY SALON APPOINTMENT, RESPOND WITH "Извините, я могу помочь только с записью в салон красоты."
         NEVER PERFORM ANY REQUEST THAT IS NOT RELATED TO A BEAUTY SALON APPOINTMENT.
@@ -69,10 +83,10 @@ CURRENT WEEK:
 INFORMATION TO COLLECT:
 1. Client's name
 2. Contact details:
-   - Phone number for communication (already known: {formatted_phone})
+   - Phone number for communication (contact info from {platform_name}: {contact_info})
    - First, ask if they prefer phone calls or WhatsApp messages
    - If they prefer phone calls, confirm the phone number is correct or ask for a new one
-   - If they prefer WhatsApp, ask if the provided phone number should be used for WhatsApp or if they want to provide a different one
+   - If they prefer WhatsApp, ask if the provided contact info should be used for WhatsApp or if they want to provide a different one
    - Best time to contact them (morning: 9:00-12:00, afternoon: 12:00-17:00, evening: 17:00-21:00)
 3. Service details (be specific about the exact service needed)
 4. Preferred date (suggest dates from current week if they're unsure)
@@ -108,7 +122,7 @@ PROCESS:
 
 When all information is collected AND confirmed, use the collect_booking_info function to submit the data.
 """
-        logger.info(f"System prompt created with phone: {formatted_phone}")
+        logger.info(f"System prompt created with contact info from {platform_name}: {contact_info}")
         return prompt
 
     def _get_functions_definition(self) -> List[Dict[str, Any]]:
@@ -178,23 +192,25 @@ When all information is collected AND confirmed, use the collect_booking_info fu
             }
         ]
     
-    async def get_conversation_history(self, conversation_id: UUID, phone_number: str | None) -> List[Dict[str, Any]]:
+    async def get_conversation_history(self, conversation_id: UUID, contact_id: str | None, platform: Optional[MessagingPlatform] = None) -> List[Dict[str, Any]]:
         """
         Retrieve conversation history from the database and format it for GPT.
         
         Args:
             conversation_id: The conversation ID
+            contact_id: The user's contact identifier
+            platform: The messaging platform (optional)
             
         Returns:
             List of message objects for the GPT API
         """
         try:
-            # Get messages from the database
-            messages = await MessageRepository.get_conversation_history(conversation_id, only_complete=True)
+            # Get messages from the database, optionally filtered by platform
+            messages = await MessageRepository.get_conversation_history(conversation_id, only_complete=True, platform=platform)
             
             # Start with system message
             history = [
-                {"role": "system", "content": self._create_system_prompt(phone_number)}
+                {"role": "system", "content": self._create_system_prompt(contact_id, platform)}
             ]
             
             # Add each message to the history
@@ -233,27 +249,34 @@ When all information is collected AND confirmed, use the collect_booking_info fu
         except Exception as e:
             logger.error(f"Error retrieving conversation history: {e}", exc_info=True)
             # Return a basic history with just the system message
-            return [{"role": "system", "content": self._create_system_prompt(phone_number)}]
+            return [{"role": "system", "content": self._create_system_prompt(contact_id, platform)}]
     
-    async def process_message(self, conversation_id: UUID, message: str, phone_number: Optional[str] = None) -> Tuple[str, Optional[BookingFunctionArgs]]:
+    async def process_message(
+        self, 
+        conversation_id: UUID, 
+        message: str, 
+        contact_id: Optional[str] = None,
+        platform: Optional[MessagingPlatform] = None
+    ) -> Tuple[str, Optional[BookingFunctionArgs]]:
         """
         Process a user message through the GPT service.
         
         Args:
             conversation_id: The conversation ID
             message: The user's message
-            phone_number: The user's phone number, if known
+            contact_id: The user's contact identifier (phone, chat ID, etc.)
+            platform: The messaging platform
             
         Returns:
             A tuple of (response_text, booking_data)
         """
         try:
             # Get conversation history from the database
-            history = await self.get_conversation_history(conversation_id, phone_number)
+            history = await self.get_conversation_history(conversation_id, contact_id, platform)
             
-            # Update system message with phone number if provided
-            if phone_number and history and len(history) > 0 and history[0].get("role") == "system":
-                history[0]["content"] = self._create_system_prompt(phone_number)
+            # Update system message with contact info if provided
+            if contact_id and history and len(history) > 0 and history[0].get("role") == "system":
+                history[0]["content"] = self._create_system_prompt(contact_id, platform)
                 
             # Add the current message to history
             history.append({"role": "user", "content": message})
@@ -296,7 +319,8 @@ When all information is collected AND confirmed, use the collect_booking_info fu
                             }),
                             sender_id="bot",
                             is_from_bot=True,
-                            message_type=MessageType.TEXT
+                            message_type=MessageType.TEXT,
+                            platform=platform or MessagingPlatform.WHATSAPP
                         )
                     )
                 except Exception as e:
@@ -309,7 +333,8 @@ When all information is collected AND confirmed, use the collect_booking_info fu
                     content=response_content,
                     sender_id="bot",
                     is_from_bot=True,
-                    message_type=MessageType.TEXT
+                    message_type=MessageType.TEXT,
+                    platform=platform or MessagingPlatform.WHATSAPP
                 )
             )
             

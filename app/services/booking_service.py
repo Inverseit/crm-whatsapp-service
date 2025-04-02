@@ -15,21 +15,18 @@ from app.models.booking import (
     ContactMethod,
     BookingFunctionArgs,
 )
-from app.models.conversation import Conversation, ConversationState
+from app.models.conversation import Conversation, ConversationState, MessagingPlatform
 from app.models.message import Message, MessageCreate, MessageType
 from app.services.gpt_service import GPTService
-from app.services.whatsapp_service import WhatsAppService
 from app.config import settings
-from .user_message_responses import (
+from .messaging.interfaces import (
     UserMessageResponseBase,
     UserMessageResponseText,
     UserMessageResponseTemplate,
 )
 from .notification_service import NotificationClient
 
-
 logger = logging.getLogger(__name__)
-
 
 class BookingManager:
     """Manager for booking-related operations."""
@@ -37,40 +34,52 @@ class BookingManager:
     def __init__(
         self,
         gpt_service: Optional[GPTService] = None,
-        whatsapp_service: Optional[WhatsAppService] = None,
     ):
         self.gpt_service = gpt_service or GPTService()
-        self.whatsapp_service = whatsapp_service or WhatsAppService()
 
     async def process_user_message(
-        self, phone_number: str, message_text: str
+        self, 
+        contact_info: Dict[str, str], 
+        message_text: str,
+        platform: MessagingPlatform = MessagingPlatform.WHATSAPP
     ) -> Tuple[UserMessageResponseBase, bool]:
         """
         Process a user message and update the conversation state accordingly.
 
         Args:
-            phone_number: The user's phone number
+            contact_info: Dict containing platform-specific contact information
+                (e.g., phone_number, whatsapp_id, telegram_id, telegram_chat_id)
             message_text: The message content
+            platform: The messaging platform the message was received from
 
         Returns:
             Tuple of (response_message, should_send_response)
         """
-        # Get or create conversation
-        conversation = await ConversationRepository.get_or_create(phone_number)
+        # Find or create conversation for this user
+        conversation = await ConversationRepository.find_or_create_conversation(
+            platform, contact_info
+        )
+
+        # Determine sender ID based on platform
+        sender_id = self._get_sender_id(contact_info, platform)
 
         # Create a message record
         user_message = MessageCreate(
-            content=message_text, sender_id=phone_number, is_from_bot=False
+            content=message_text, 
+            sender_id=sender_id, 
+            is_from_bot=False,
+            platform=platform
         )
         await MessageRepository.create(conversation.id, user_message)
 
         # Process message based on conversation state
         if conversation.state == ConversationState.GREETING:
             logger.debug("Handling greeting state")
-            await self._handle_greeting(conversation)
+            greeting_message = await self._handle_greeting(conversation)
             return (
                 UserMessageResponseTemplate(
-                    template_name=settings.whatsapp_greeting_template, template_data={}
+                    template_name=settings.whatsapp_greeting_template, 
+                    template_data={}
                 ),
                 True,
             )
@@ -79,17 +88,18 @@ class BookingManager:
                 conversation.id,
                 {"state": ConversationState.GREETING, "is_complete": True},
             )
-            await self._handle_greeting(conversation)
+            greeting_message = await self._handle_greeting(conversation)
             return (
                 UserMessageResponseTemplate(
-                    template_name=settings.whatsapp_greeting_template, template_data={}
+                    template_name=settings.whatsapp_greeting_template, 
+                    template_data={}
                 ),
                 True,
             )
         elif conversation.state == ConversationState.COLLECTING_INFO:
             # For all other states, just process with GPT and check for booking data
             logger.debug("Handling conversation with GPT")
-            return await self._handle_conversation_with_gpt(conversation, message_text)
+            return await self._handle_conversation_with_gpt(conversation, message_text, platform)
         else:
             logger.warning(f"Unknown conversation state: {conversation.state}")
             return (
@@ -98,6 +108,23 @@ class BookingManager:
                 ),
                 True,
             )
+
+    def _get_sender_id(self, contact_info: Dict[str, str], platform: MessagingPlatform) -> str:
+        """
+        Get the appropriate sender ID based on platform and available contact info.
+        
+        Args:
+            contact_info: Dict with platform-specific contact information
+            platform: The messaging platform
+            
+        Returns:
+            The appropriate sender ID for the platform
+        """
+        if platform == MessagingPlatform.WHATSAPP:
+            return contact_info.get("whatsapp_id", "") or contact_info.get("phone_number", "")
+        elif platform == MessagingPlatform.TELEGRAM:
+            return contact_info.get("telegram_id", "")
+        return contact_info.get("phone_number", "")
 
     async def _handle_greeting(self, conversation: Conversation) -> str:
         """
@@ -118,27 +145,36 @@ class BookingManager:
         greeting = "Здравствуйте! Я бот салона красоты. Я помогу вам записаться на процедуру. Подскажите, пожалуйста, как к вам обращаться?"
 
         # Create a bot message
-        bot_message = MessageCreate(content=greeting, sender_id="bot", is_from_bot=True)
+        bot_message = MessageCreate(
+            content=greeting, 
+            sender_id="bot", 
+            is_from_bot=True,
+            platform=conversation.primary_platform
+        )
         await MessageRepository.create(conversation.id, bot_message)
 
         return greeting
 
     async def _handle_conversation_with_gpt(
-        self, conversation: Conversation, message_text: str
-    ) -> Tuple[str, bool]:
+        self, conversation: Conversation, message_text: str, platform: MessagingPlatform
+    ) -> Tuple[UserMessageResponseBase, bool]:
         """
         Process the conversation with GPT and check for booking data.
 
         Args:
             conversation: The conversation
             message_text: The user's message
+            platform: The messaging platform
 
         Returns:
-            Tuple of (response_text, should_send)
+            Tuple of (response, should_send)
         """
+        # Get the appropriate contact identifier
+        contact_id = conversation.get_platform_id(platform)
+        
         # Process message with GPT
         response, booking_data = await self.gpt_service.process_message(
-            conversation.id, message_text, conversation.phone_number
+            conversation.id, message_text, contact_id, platform
         )
 
         # If booking data was provided by GPT, create a booking
@@ -168,31 +204,35 @@ class BookingManager:
 
                 # Create a bot message for the confirmation
                 bot_message = MessageCreate(
-                    content=confirmation, sender_id="bot", is_from_bot=True
+                    content=confirmation, 
+                    sender_id="bot", 
+                    is_from_bot=True,
+                    platform=platform
                 )
                 await MessageRepository.create(conversation.id, bot_message)
 
-                # Mark all previous messages as complete
-                await MessageRepository.mark_conversation_messages_as_complete(
-                    conversation.id
+                # Mark all previous messages as complete for this platform
+                await MessageRepository.mark_platform_messages_as_complete(
+                    conversation.id, platform
                 )
                 
                 try:
                     NotificationClient().create_notification({
-                    "type": "booking",
-                    "booking_id": str(booking.id),
-                    "phone_number": booking.phone,
-                    "client_name": booking.client_name,
-                    "service_description": booking.service_description,
-                    "booking_date": booking.booking_date.isoformat() if booking.booking_date else None,
-                    "booking_time": booking.booking_time.isoformat() if booking.booking_time else None,
-                    "time_of_day": booking.time_of_day.value if booking.time_of_day else None,
-                    "preferred_contact_method": booking.preferred_contact_method.value,
-                    "preferred_contact_time": booking.preferred_contact_time.value if booking.preferred_contact_time else None,
-                    "additional_notes": booking.additional_notes
+                        "type": "booking",
+                        "booking_id": str(booking.id),
+                        "phone_number": booking.phone,
+                        "client_name": booking.client_name,
+                        "service_description": booking.service_description,
+                        "booking_date": booking.booking_date.isoformat() if booking.booking_date else None,
+                        "booking_time": booking.booking_time.isoformat() if booking.booking_time else None,
+                        "time_of_day": booking.time_of_day.value if booking.time_of_day else None,
+                        "preferred_contact_method": booking.preferred_contact_method.value,
+                        "preferred_contact_time": booking.preferred_contact_time.value if booking.preferred_contact_time else None,
+                        "additional_notes": booking.additional_notes,
+                        "platform": platform.value
                     })
                 except Exception as e:
-                  logger.error(f"Error creating notification: {e}")
+                    logger.error(f"Error creating notification: {e}")
 
                 logger.info(f"Booking created: {booking.id}")
 
@@ -204,17 +244,20 @@ class BookingManager:
 
                 # Add error message to conversation
                 error_bot_message = MessageCreate(
-                    content=error_message, sender_id="bot", is_from_bot=True
+                    content=error_message, 
+                    sender_id="bot", 
+                    is_from_bot=True,
+                    platform=platform
                 )
                 await MessageRepository.create(conversation.id, error_bot_message)
 
                 return UserMessageResponseText(text=error_message), True
 
-        # If no booking data yet, just return the GPT response
-        return response, True
+        # If no booking data yet, just return the GPT response as text
+        return UserMessageResponseText(text=response), True
 
     async def _handle_completed(
-        self, conversation: Conversation, message_text: str
+        self, conversation: Conversation, message_text: str, platform: MessagingPlatform
     ) -> str:
         """
         Handle the completed state of a conversation.
@@ -222,6 +265,7 @@ class BookingManager:
         Args:
             conversation: The conversation
             message_text: The user's message
+            platform: The messaging platform
 
         Returns:
             The response message
@@ -249,7 +293,10 @@ class BookingManager:
 
             # Add bot message to conversation
             bot_message = MessageCreate(
-                content=new_booking_message, sender_id="bot", is_from_bot=True
+                content=new_booking_message, 
+                sender_id="bot", 
+                is_from_bot=True,
+                platform=platform
             )
             await MessageRepository.create(conversation.id, bot_message)
 
@@ -257,9 +304,12 @@ class BookingManager:
         else:
             # For any other message, proceed with GPT conversation
             response, _ = await self._handle_conversation_with_gpt(
-                conversation, message_text
+                conversation, message_text, platform
             )
-            return response
+            if isinstance(response, UserMessageResponseText):
+                return response.text
+            # Fallback to string representation
+            return str(response)
 
     def _convert_to_booking_create(
         self, booking_args: BookingFunctionArgs, conversation_id: UUID
@@ -342,44 +392,63 @@ class BookingManager:
             status=BookingStatus.PENDING,
         )
 
-    async def send_text_response(self, phone_number: str, message: str) -> bool:
+    async def send_text_response(self, recipient_id: str, message: str, platform: str = "whatsapp") -> bool:
         """
-        Send a response message to the user via WhatsApp.
+        Send a text response message to the user via the specified platform.
 
         Args:
-            phone_number: The user's phone number
+            recipient_id: The user's identifier (phone number for WhatsApp, chat_id for Telegram)
             message: The message to send
+            platform: The messaging platform to use
 
         Returns:
             True if the message was sent successfully, False otherwise
         """
         try:
-            # Send the message via WhatsApp
-            await self.whatsapp_service.send_message(phone_number, message)
-            return True
+            from app.services.messaging.factory import MessagingFactory
+            from app.services.messaging.interfaces import TextMessageContent
+            
+            transport = MessagingFactory.get_transport(platform)
+            if not transport:
+                logger.error(f"Transport not available for platform: {platform}")
+                return False
+                
+            return await transport.send_message(
+                recipient_id,
+                TextMessageContent(text=message)
+            )
         except Exception as e:
-            logger.error(f"Error sending WhatsApp message: {e}")
+            logger.error(f"Error sending {platform} text message: {e}")
             return False
 
     async def send_response_template(
-        self, phone_number: str, template: str, template_data: Dict[str, Any]
+        self, recipient_id: str, template: str, template_data: Dict[str, Any], platform: str = "whatsapp"
     ) -> bool:
         """
-        Send a response message to the user via WhatsApp.
+        Send a template response message to the user via the specified platform.
 
         Args:
-            phone_number: The user's phone number
-            message: The message to send
+            recipient_id: The user's identifier (phone number for WhatsApp, chat_id for Telegram)
+            template: The template name
+            template_data: The template data
+            platform: The messaging platform to use
 
         Returns:
             True if the message was sent successfully, False otherwise
         """
         try:
-            # Send the message via WhatsApp
-            await self.whatsapp_service.send_template_message(
-                phone_number, template, template_data
+            from app.services.messaging.factory import MessagingFactory
+            from app.services.messaging.interfaces import TemplateMessageContent
+            
+            transport = MessagingFactory.get_transport(platform)
+            if not transport:
+                logger.error(f"Transport not available for platform: {platform}")
+                return False
+                
+            return await transport.send_message(
+                recipient_id,
+                TemplateMessageContent(template_name=template, template_data=template_data)
             )
-            return True
         except Exception as e:
-            logger.error(f"Error sending WhatsApp message: {e}")
+            logger.error(f"Error sending {platform} template message: {e}")
             return False

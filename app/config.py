@@ -26,13 +26,18 @@ class Settings(BaseSettings):
     whatsapp_greeting_template: str = Field(default="greeting")
     whatsapp_template_language_code: str = Field(default="en_US")
     
+    # Telegram API settings
+    telegram_api_token: str = Field(default="", description="Telegram Bot API token")
+    telegram_webhook_token: str = Field(default="your_telegram_webhook_token", description="Token for webhook verification")
+    
+    SELF_BACKEND_URL: str = Field(default="http://localhost:8000")
     BACKEND_URL: str = Field(default="http://localhost:8000")
     AUTH_EMAIL: str = Field(default="")
     AUTH_PASSWORD: str = Field(default="")
     
     # App settings
     debug: bool = Field(default=False)
-    
+
     @property
     def database_url(self) -> str:
         """
