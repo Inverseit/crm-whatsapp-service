@@ -5,13 +5,12 @@ from typing import Dict, Any, Optional, List
 import json
 
 from app.models.message import WebhookMessage
-from app.models.conversation import MessagingPlatform
 from app.services.booking_service import BookingManager
 from app.services.messaging.factory import MessagingFactory
-from app.services.messaging.interfaces import TextMessageContent, TemplateMessageContent
-from app.api.dependencies import get_booking_manager
+from app.api.dependencies import get_booking_manager, get_db
 from app.config import settings
 from app.services.messaging.interfaces import MessageType, UserMessageResponseText, UserMessageResponseTemplate
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
@@ -24,22 +23,22 @@ logger = logging.getLogger(__name__)
     """,
     response_description="Returns the challenge string if verification is successful",
     responses={
-        200: {
-            "description": "Successful verification",
-            "content": {
-                "text/plain": {
-                    "example": "1234567890"
-                }
-            }
-        },
-        403: {
-            "description": "Verification failed",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Verification failed"}
-                }
+    200: {
+        "description": "Successful verification",
+        "content": {
+            "text/plain": {
+                "example": "1234567890"
             }
         }
+    },
+    403: {
+        "description": "Verification failed",
+        "content": {
+            "application/json": {
+                "example": {"detail": "Verification failed"}
+            }
+        }
+    }
     }
 )
 async def verify_whatsapp_webhook(
@@ -81,31 +80,14 @@ async def verify_whatsapp_webhook(
     
     This endpoint expects the format from the WhatsApp Business API/Meta Cloud API.
     """,
-    response_description="Acknowledgment of receipt",
-    responses={
-        200: {
-            "description": "Message received and processing started",
-            "content": {
-                "application/json": {
-                    "example": {"status": "success", "message": "Message received"}
-                }
-            }
-        },
-        500: {
-            "description": "Error processing the webhook",
-            "content": {
-                "application/json": {
-                    "example": {"status": "error", "message": "Error message details"}
-                }
-            }
-        }
-    }
+    response_description="Acknowledgment of receipt"
 )
 async def receive_whatsapp_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
     x_hub_signature: Optional[str] = Header(None, description="The SHA1 signature of the request payload"),
-    booking_manager: BookingManager = Depends(get_booking_manager)
+    booking_manager: BookingManager = Depends(get_booking_manager),
+    db: AsyncSession = Depends(get_db)
 ) -> JSONResponse:
     """
     Receive a webhook from WhatsApp.
@@ -115,6 +97,7 @@ async def receive_whatsapp_webhook(
         background_tasks: FastAPI background tasks
         x_hub_signature: The SHA1 signature of the request payload (optional)
         booking_manager: The booking manager service
+        db: The database session
         
     Returns:
         A JSON response
@@ -147,8 +130,7 @@ async def receive_whatsapp_webhook(
         background_tasks.add_task(
             process_whatsapp_message,
             booking_manager,
-            parsed_message["phone_number"],
-            parsed_message["message"]
+            parsed_message
         )
         
         # Return immediate success to WhatsApp
@@ -170,25 +152,7 @@ async def receive_whatsapp_webhook(
     Handles the webhook verification request from Telegram.
     This endpoint can be used to check if the webhook is properly set up.
     """,
-    response_description="Returns a success message if verification is successful",
-    responses={
-        200: {
-            "description": "Successful verification",
-            "content": {
-                "application/json": {
-                    "example": {"status": "success", "message": "Telegram webhook is operational"}
-                }
-            }
-        },
-        403: {
-            "description": "Verification failed",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Verification failed"}
-                }
-            }
-        }
-    }
+    response_description="Returns a success message if verification is successful"
 )
 async def verify_telegram_webhook(
     request: Request,
@@ -222,30 +186,13 @@ async def verify_telegram_webhook(
     
     This endpoint expects the format from the Telegram Bot API.
     """,
-    response_description="Acknowledgment of receipt",
-    responses={
-        200: {
-            "description": "Message received and processing started",
-            "content": {
-                "application/json": {
-                    "example": {"status": "success", "message": "Message received"}
-                }
-            }
-        },
-        500: {
-            "description": "Error processing the webhook",
-            "content": {
-                "application/json": {
-                    "example": {"status": "error", "message": "Error message details"}
-                }
-            }
-        }
-    }
+    response_description="Acknowledgment of receipt"
 )
 async def receive_telegram_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    booking_manager: BookingManager = Depends(get_booking_manager)
+    booking_manager: BookingManager = Depends(get_booking_manager),
+    db: AsyncSession = Depends(get_db)
 ) -> JSONResponse:
     """
     Receive a webhook from Telegram.
@@ -254,6 +201,7 @@ async def receive_telegram_webhook(
         request: The HTTP request
         background_tasks: FastAPI background tasks
         booking_manager: The booking manager service
+        db: The database session
         
     Returns:
         A JSON response
@@ -302,94 +250,13 @@ async def receive_telegram_webhook(
             content={"status": "error", "message": str(e)}
         )
 
-@router.post("/message", 
-    summary="Receive Generic Message",
-    description="""
-    Generic webhook endpoint for receiving messages from any messaging platform.
-    This can be used with custom integrations where you control the message format.
-    """,
-    response_model_exclude_none=True,
-    responses={
-        200: {
-            "description": "Message received and processing started",
-            "content": {
-                "application/json": {
-                    "example": {"status": "success", "message": "Message received"}
-                }
-            }
-        },
-        500: {
-            "description": "Error processing the message",
-            "content": {
-                "application/json": {
-                    "example": {"status": "error", "message": "Error details"}
-                }
-            }
-        }
-    }
-)
-async def receive_generic_message(
-    message: WebhookMessage,
-    background_tasks: BackgroundTasks,
-    booking_manager: BookingManager = Depends(get_booking_manager)
-) -> JSONResponse:
-    """
-    Generic endpoint for receiving messages from any platform.
-    
-    Args:
-        message: The parsed message object
-        background_tasks: FastAPI background tasks
-        booking_manager: The booking manager service
-        
-    Returns:
-        A JSON response
-    """
-    try:
-        # Create contact info dictionary based on the provided fields
-        contact_info = {
-            "phone_number": message.phone_number,
-            "whatsapp_id": message.whatsapp_id,
-            "telegram_id": message.telegram_id,
-            "telegram_chat_id": message.telegram_chat_id
-        }
-        
-        # Process the message in the background
-        background_tasks.add_task(
-            process_generic_message,
-            booking_manager,
-            contact_info,
-            message.message,
-            message.platform
-        )
-        
-        return JSONResponse(
-            status_code=200,
-            content={"status": "success", "message": "Message received"}
-        )
-    
-    except Exception as e:
-        logger.error(f"Error processing generic message: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": str(e)}
-        )
-
 @router.get("/test", 
     summary="Test Webhook Processing",
     description="""
     Test endpoint for webhook processing without actually sending messages.
     Useful for development and testing.
     """,
-    responses={
-        200: {
-            "description": "Test successful",
-            "content": {
-                "application/json": {
-                    "example": {"status": "success", "message": "Test webhook received"}
-                }
-            }
-        }
-    }
+    response_description="Test successful"
 )
 async def test_webhook() -> JSONResponse:
     """Test endpoint for webhook functionality."""
@@ -401,70 +268,46 @@ async def test_webhook() -> JSONResponse:
 
 async def process_whatsapp_message(
     booking_manager: BookingManager,
-    phone_number: str,
-    message: str
+    parsed_message: Dict[str, Any]
 ) -> None:
     """
     Process a WhatsApp message in the background and send a response.
     
     Args:
         booking_manager: The booking manager service
-        phone_number: The sender's phone number
-        message: The message content
+        parsed_message: The parsed message data
     """
     try:
-        logger.debug(f"Processing WhatsApp message: phone={phone_number}, message={message}")
+        phone_number = parsed_message.get("phone_number", "")
+        whatsapp_id = parsed_message.get("sender_id", "")
+        message_text = parsed_message.get("message", "")
+        profile_name = parsed_message.get("profile_name", "")
+        
+        logger.debug(f"Processing WhatsApp message: phone={phone_number}, whatsapp_id={whatsapp_id}, message={message_text}")
         
         # Create contact info dictionary for the platform
         contact_info = {
             "phone_number": phone_number,
-            "whatsapp_id": phone_number
+            "whatsapp_id": whatsapp_id,
+            "profile_name": profile_name
         }
         
         # Process the message with the booking manager
         response, should_send = await booking_manager.process_user_message(
-            contact_info=contact_info,
-            message_text=message,
-            platform=MessagingPlatform.WHATSAPP
+            platform="whatsapp",
+            user_contact_info=contact_info,
+            message_text=message_text
         )
         
-        logger.info(f"Processed WhatsApp message from {phone_number}, response: {response}...")
+        logger.info(f"Processed WhatsApp message from {phone_number}, response ready: {should_send}")
         
         # Send the response back to the user via WhatsApp
         if should_send:
-            task = None
-            try:
-                if isinstance(response, UserMessageResponseText):
-                    # Send a text message
-                    logger.info(f"Sending text response to {phone_number}")
-                    text_response = response
-                    task = booking_manager.send_text_response(phone_number, text_response.text, "whatsapp")
-                elif isinstance(response, UserMessageResponseTemplate):
-                    # Send a template message
-                    logger.info(f"Sending template response to {phone_number}")
-                    template_response = response
-                    task = booking_manager.send_response_template(
-                        phone_number, 
-                        template_response.template_name,
-                        template_response.template_data, 
-                        "whatsapp"
-                    )
-                else:
-                    logger.warning(f"Unsupported message type: {type(response)}")
-                    # Fallback to string representation
-                    task = booking_manager.send_text_response(phone_number, str(response), "whatsapp")
-            except Exception as e:
-                logger.error(f"Error sending WhatsApp response: {e}")
-                if isinstance(response, str):
-                    logger.info(f"FALLBACK: Sending text response to {phone_number}")
-                    task = booking_manager.send_text_response(phone_number, response, "whatsapp")
-            
-            if task:
-                success = await task
-                if success:
-                    logger.info(f"Sent WhatsApp response to {phone_number}")
-                else:
-                    logger.error(f"Failed to send WhatsApp response to {phone_number}")
+            success = await booking_manager.send_message("whatsapp", whatsapp_id, response)
+            if success:
+                logger.info(f"Sent WhatsApp response to {phone_number}")
+            else:
+                logger.error(f"Failed to send WhatsApp response to {phone_number}")
         
     except Exception as e:
         logger.error(f"Error processing WhatsApp message in background: {e}", exc_info=True)
@@ -481,127 +324,43 @@ async def process_telegram_message(
         parsed_message: The parsed message data
     """
     try:
-        sender_id = parsed_message.get("sender_id", "")
+        telegram_id = parsed_message.get("sender_id", "")
         chat_id = parsed_message.get("chat_id", "")
-        message = parsed_message.get("message", "")
+        message_text = parsed_message.get("message", "")
+        first_name = parsed_message.get("first_name", "")
+        last_name = parsed_message.get("last_name", "")
+        username = parsed_message.get("username", "")
+        
+        logger.debug(f"Processing Telegram message: sender={telegram_id}, chat={chat_id}, message={message_text}")
         
         # Create contact info dictionary for the platform
         contact_info = {
-            "telegram_id": sender_id,
-            "telegram_chat_id": chat_id
+            "telegram_id": telegram_id,
+            "chat_id": chat_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username
         }
-        
-        logger.debug(f"Processing Telegram message: sender={sender_id}, chat={chat_id}, message={message}")
         
         # Process the message with the booking manager
         response, should_send = await booking_manager.process_user_message(
-            contact_info=contact_info,
-            message_text=message,
-            platform=MessagingPlatform.TELEGRAM
+            platform="telegram",
+            user_contact_info=contact_info,
+            message_text=message_text
         )
         
-        logger.info(f"Processed Telegram message from {sender_id}, response: {response}...")
+        logger.info(f"Processed Telegram message from {telegram_id}, response ready: {should_send}")
         
         # Send the response back to the user via Telegram
         if should_send:
             # Use chat_id as the recipient ID for Telegram messages
             recipient_id = chat_id
             
-            task = None
-            try:
-                if isinstance(response, UserMessageResponseText):
-                    # Send a text message
-                    logger.info(f"Sending text response to Telegram chat {recipient_id}")
-                    text_response = response
-                    task = booking_manager.send_text_response(recipient_id, text_response.text, "telegram")
-                elif isinstance(response, UserMessageResponseTemplate):
-                    # Send a template message (converted to text for Telegram)
-                    logger.info(f"Sending template response to Telegram chat {recipient_id}")
-                    template_response = response
-                    task = booking_manager.send_response_template(
-                        recipient_id, 
-                        template_response.template_name,
-                        template_response.template_data, 
-                        "telegram"
-                    )
-                else:
-                    # Fallback to string representation
-                    task = booking_manager.send_text_response(recipient_id, str(response), "telegram")
-            except Exception as e:
-                logger.error(f"Error sending Telegram response: {e}")
-                # Fallback to simple text
-                if isinstance(response, str):
-                    logger.info(f"FALLBACK: Sending text response to Telegram chat {recipient_id}")
-                    task = booking_manager.send_text_response(recipient_id, response, "telegram")
-            
-            if task:
-                success = await task
-                if success:
-                    logger.info(f"Sent Telegram response to chat {recipient_id}")
-                else:
-                    logger.error(f"Failed to send Telegram response to chat {recipient_id}")
+            success = await booking_manager.send_message("telegram", recipient_id, response)
+            if success:
+                logger.info(f"Sent Telegram response to chat {recipient_id}")
+            else:
+                logger.error(f"Failed to send Telegram response to chat {recipient_id}")
         
     except Exception as e:
         logger.error(f"Error processing Telegram message in background: {e}", exc_info=True)
-
-async def process_generic_message(
-    booking_manager: BookingManager,
-    contact_info: Dict[str, str],
-    message: str,
-    platform: MessagingPlatform = MessagingPlatform.GENERIC
-) -> None:
-    """
-    Process a generic message in the background.
-    
-    Args:
-        booking_manager: The booking manager service
-        contact_info: Dictionary with contact information
-        message: The message content
-        platform: The messaging platform
-    """
-    try:
-        logger.debug(f"Processing {platform.value} message: {message}")
-        
-        # Process the message with the booking manager
-        response, should_send = await booking_manager.process_user_message(
-            contact_info=contact_info,
-            message_text=message,
-            platform=platform
-        )
-        
-        logger.info(f"Processed {platform.value} message, response: {response}...")
-        
-        # For generic messages, we don't automatically send responses
-        # The caller is responsible for retrieving and sending responses
-        
-    except Exception as e:
-        logger.error(f"Error processing {platform.value} message: {e}")
-
-# Original process_message function for backward compatibility
-async def process_message(
-    booking_manager: BookingManager,
-    phone_number: str,
-    message: str
-) -> None:
-    """
-    Process a message in the background but don't send a response (legacy method).
-    
-    Args:
-        booking_manager: The booking manager service
-        phone_number: The sender's phone number
-        message: The message content
-    """
-    try:
-        # Convert to new format
-        contact_info = {"phone_number": phone_number, "whatsapp_id": phone_number}
-        
-        # Process the message with the booking manager
-        response, _ = await booking_manager.process_user_message(
-            contact_info=contact_info,
-            message_text=message,
-            platform=MessagingPlatform.WHATSAPP
-        )
-        logger.info(f"Processed message from {phone_number}, response: {response}...")
-        
-    except Exception as e:
-        logger.error(f"Error processing message in background: {e}")

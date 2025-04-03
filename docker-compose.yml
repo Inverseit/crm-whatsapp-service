@@ -17,6 +17,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migration:
+        condition: service_completed_successfully
     restart: unless-stopped
     command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
@@ -36,6 +38,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  migration:
+    build:
+      context: .
+      dockerfile: alembic/Dockerfile
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=salon_booking
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+    depends_on:
+      db:
+        condition: service_healthy
+    command: [ "upgrade", "head" ]
 
 volumes:
   postgres_data:

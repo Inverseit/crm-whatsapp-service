@@ -4,35 +4,7 @@ from uuid import UUID, uuid4
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 import phonenumbers
-
-class TimeOfDay(str, Enum):
-    """Time of day preference for appointments or contacts."""
-    MORNING = "morning"  # 9:00 to 12:00
-    AFTERNOON = "afternoon"  # 12:00 to 17:00
-    EVENING = "evening"  # 17:00 to 21:00
-    
-    @classmethod
-    def from_time(cls, t: time) -> Optional["TimeOfDay"]:
-        """Convert a time object to a TimeOfDay enum value."""
-        if time(9, 0) <= t < time(12, 0):
-            return cls.MORNING
-        elif time(12, 0) <= t < time(17, 0):
-            return cls.AFTERNOON
-        elif time(17, 0) <= t < time(21, 0):
-            return cls.EVENING
-        else:
-            return None
-
-class ContactMethod(str, Enum):
-    """Preferred method for contacting clients."""
-    PHONE_CALL = "phone_call"
-    WHATSAPP_MESSAGE = "whatsapp_message"
-
-class BookingStatus(str, Enum):
-    """Status of a booking."""
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
+from app.db.models import TimeOfDay, ContactMethod, BookingStatus
 
 class PhoneNumber(BaseModel):
     """Model for validating and normalizing phone numbers."""
@@ -41,22 +13,22 @@ class PhoneNumber(BaseModel):
     @field_validator('number')
     @classmethod
     def validate_phone(cls, v: str) -> str:
-      """Validate and normalize a phone number to E.164 format."""
-      try:
-        # Parse phone number with phonenumbers library
-        v = v.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-        
-        # Parse and validate the phone number
-        phone_number = phonenumbers.parse(v)
-        if not phonenumbers.is_valid_number(phone_number):
-          raise ValueError('Invalid phone number format')
-        
-        # Format to E164 format for consistency
-        return phonenumbers.format_number(phone_number, phonenumbers.PhoneNumberFormat.E164)
-      except Exception as e:
-        # Log the error but still return the original number
-        print(f'Error formatting phone number: {e}')
-        return v
+        """Validate and normalize a phone number to E.164 format."""
+        try:
+            # Parse phone number with phonenumbers library
+            v = v.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            
+            # Parse and validate the phone number
+            phone_number = phonenumbers.parse(v)
+            if not phonenumbers.is_valid_number(phone_number):
+                raise ValueError('Invalid phone number format')
+            
+            # Format to E164 format for consistency
+            return phonenumbers.format_number(phone_number, phonenumbers.PhoneNumberFormat.E164)
+        except Exception as e:
+            # Log the error but still return the original number
+            print(f'Error formatting phone number: {e}')
+            return v
 
 class ContactInfo(BaseModel):
     """Contact information for a client."""
@@ -115,31 +87,15 @@ class BookingCreate(BookingBase):
     conversation_id: UUID = Field(..., description="ID of the conversation this booking belongs to")
     status: BookingStatus = Field(default=BookingStatus.PENDING, description="Current status of the booking")
 
-class Booking(BookingBase):
-    """Complete booking model with all fields."""
-    id: UUID = Field(default_factory=uuid4, description="Unique booking identifier")
+class BookingResponse(BookingBase):
+    """Complete booking model with all fields for API responses."""
+    id: UUID = Field(..., description="Unique booking identifier")
     conversation_id: UUID = Field(..., description="ID of the conversation this booking belongs to")
-    status: BookingStatus = Field(default=BookingStatus.PENDING, description="Current status of the booking")
-    created_at: datetime = Field(default_factory=datetime.now, description="When the booking was created")
-    last_updated: datetime = Field(default_factory=datetime.now, description="When the booking was last updated")
+    status: BookingStatus = Field(..., description="Current status of the booking")
+    created_at: datetime = Field(..., description="When the booking was created")
+    updated_at: datetime = Field(..., description="When the booking was last updated")
     
     model_config = ConfigDict(from_attributes=True)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert booking to a dictionary that can be serialized to JSON."""
-        result = self.model_dump(exclude_none=True)
-        
-        # Convert date and time to strings
-        if result.get('booking_date'):
-            result['booking_date'] = result['booking_date'].isoformat()
-        if result.get('booking_time'):
-            result['booking_time'] = result['booking_time'].isoformat()
-        if result.get('created_at'):
-            result['created_at'] = result['created_at'].isoformat()
-        if result.get('last_updated'):
-            result['last_updated'] = result['last_updated'].isoformat()
-            
-        return result
 
 class BookingUpdate(BaseModel):
     """Model for updating an existing booking. All fields are optional."""
@@ -178,7 +134,7 @@ class BookingFunctionArgs(BaseModel):
     phone: str = Field(..., description="Client's phone number")
     use_phone_for_whatsapp: bool = Field(True, description="Whether to use phone number for WhatsApp")
     whatsapp: Optional[str] = Field(None, description="Client's WhatsApp number if different")
-    preferred_contact_method: str = Field(..., description="Preferred contact method (phone_call or whatsapp_message)")
+    preferred_contact_method: str = Field(..., description="Preferred contact method (phone_call, whatsapp_message, or telegram_message)")
     preferred_contact_time: Optional[str] = Field(None, description="Preferred contact time (morning, afternoon, evening)")
     service_description: str = Field(..., description="Service description")
     booking_date: Optional[str] = Field(None, description="Appointment date as string")

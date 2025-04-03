@@ -44,6 +44,13 @@ class Settings(BaseSettings):
         Constructs a PostgreSQL connection string from the individual settings.
         """
         return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+    
+    @property
+    def database_url_async(self) -> str:
+        """
+        Constructs an async PostgreSQL connection string for SQLAlchemy.
+        """
+        return f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
 
     class Config:
         env_file = ".env"

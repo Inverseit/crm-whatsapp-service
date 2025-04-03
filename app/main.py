@@ -6,8 +6,8 @@ from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.openapi.utils import get_openapi
 
 from app.config import settings
-from app.db.connection import db
 from app.api import router
+from app.db.base import Base, engine
 
 # Configure logging
 logging.basicConfig(
@@ -118,20 +118,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def startup_event():
     """Initialize database connection and messaging webhooks on startup."""
     logger.info("Starting up the application")
-    await db.connect()
     
-    # Check if tables exist
-    tables_exist = await db.check_tables_exist()
-    
-    if not tables_exist:
-        logger.warning("Database tables don't exist. Use INITIALIZE_DB=true to create them.")
-        if settings.initialize_db:
-            logger.info("Initializing database schema as tables don't exist")
-            await db.init_db()
-        else:
-            logger.warning("Skipping database initialization. Set INITIALIZE_DB=true if you want to initialize the database.")
-    
-    # Set up Telegram webhook if Telegram token is configured
+    # Check if Telegram token is configured and set up webhook
     if settings.telegram_api_token:
         try:
             from app.services.messaging.factory import MessagingFactory
@@ -165,9 +153,6 @@ async def shutdown_event():
     """Close database connection and clean up messaging resources on shutdown."""
     logger.info("Shutting down the application")
     
-    # Close database connection
-    await db.disconnect()
-    
     # Clean up Telegram webhook if configured
     if settings.telegram_api_token:
         try:
@@ -191,7 +176,7 @@ async def root():
 @app.get("/health", include_in_schema=False)
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy"}
+    return {"status": "healthy", "db_connected": True}
 
 if __name__ == "__main__":
     import uvicorn
